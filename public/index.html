@@ -176,6 +176,12 @@
             const end = document.getElementById('end').value;
             const storeKey = document.getElementById('storeSelect').value;
 
+            // require explicit store selection
+            if (!storeKey) {
+                document.getElementById('meta').textContent = 'Please select a store before running the report.';
+                return;
+            }
+
             const payload = { reportType, dateFilterType };
             if (storeKey) payload.storeKey = storeKey;
             if (status) payload.status = status;
@@ -268,6 +274,12 @@
                 const stores = await res.json();
                 const sel = document.getElementById('storeSelect');
                 sel.innerHTML = '';
+                const placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = '-- select a store --';
+                placeholder.disabled = true;
+                placeholder.selected = true;
+                sel.appendChild(placeholder);
                 stores.forEach(s => {
                     const o = document.createElement('option');
                     o.value = s.key;
