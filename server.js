@@ -115,23 +115,36 @@ function formatProductPersonalization(pp) {
 function getConfiguredStores() {
   const env = process.env.BRIGHTSITES_STORES;
   if (env) {
-    try { return JSON.parse(env); } catch (e) { console.warn('BRIGHTSITES_STORES invalid JSON'); }
+    try {
+      const parsed = JSON.parse(env);
+      // normalize: if an entry lacks `token`, use the map key as the token
+      const out = {};
+      Object.entries(parsed).forEach(([k, v]) => {
+        const store = Object.assign({}, v || {});
+        if (!store.token) store.token = k;
+        out[k] = store;
+      });
+      return out;
+    } catch (e) { console.warn('BRIGHTSITES_STORES invalid JSON'); }
   }
-  // default stores (pre-populated)
-  return {
-    primary: { subdomain: process.env.BRIGHTSITES_SUBDOMAIN, token: process.env.BRIGHTSITES_API_TOKEN, label: 'Primary' },
-    ftg_shop: { subdomain: 'ftg-shop', token: process.env.BRIGHTSITES_API_TOKEN, label: 'FTG Shop' },
-    ftg_redemption: { subdomain: 'ftg-redemption', token: 'sfpyad7b7bpo_zQtfN_o', label: 'FTG Redemption' }
-  };
+  // No hard-coded defaults. Return empty object if BRIGHTSITES_STORES not provided.
+  return {};
 }
 
 app.post('/api/run', async (req, res) => {
   try {
     const body = req.body || {};
-  const storeKey = body.storeKey || 'primary';
-  const stores = getConfiguredStores();
-  const store = stores[storeKey] || stores.primary || {};
-  const storeOpts = { subdomain: store.subdomain, token: store.token };
+    // require explicit storeKey to avoid accidental defaults; caller must select a store
+    const storeKey = body.storeKey;
+    const stores = getConfiguredStores();
+    if (!storeKey) {
+      return res.status(400).json({ error: 'storeKey is required. Call GET /api/stores to list available stores and include storeKey in the request body.' });
+    }
+    const store = stores[storeKey];
+    if (!store) {
+      return res.status(400).json({ error: `storeKey '${String(storeKey)}' not found. Available stores: ${Object.keys(stores).join(', ')}` });
+    }
+    const storeOpts = { subdomain: store.subdomain, token: store.token };
     const reportType = body.reportType || 'Needed Excel';
     const dateFilterType = body.dateFilterType || 'created_at';
     const status = body.status;
