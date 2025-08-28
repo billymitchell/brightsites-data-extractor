@@ -1,0 +1,345 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>BrightSites Exporter</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, Arial;
+            margin: 24px;
+        }
+
+        label {
+            display: block;
+            margin-top: 8px
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 12px
+        }
+
+        th,
+        td {
+            border: 1px solid #ddd;
+            padding: 6px;
+            font-size: 13px
+        }
+
+        th {
+            background: #f3f3f3
+        }
+
+        #preview {
+            max-height: 500px;
+            overflow: auto
+        }
+
+        button {
+            padding: 8px 12px
+        }
+    </style>
+</head>
+
+<body>
+    <h2>BrightSites CSV Export</h2>
+    <div class="controls">
+        <div>
+            <label>Store
+                <select id="storeSelect">
+                    <option>Loading...</option>
+                </select>
+            </label>
+        </div>
+        <div>
+            <label>Report Type
+                <select id="reportType">
+                    <option>Orders Summary</option>
+                    <option>Orders with Items</option>
+                    <option>Shipments</option>
+                    <option selected>Needed Excel</option>
+                </select>
+            </label>
+        </div>
+        <div>
+            <label>Date Preset
+                <select id="datePreset">
+                    <option value="custom">Custom</option>
+                    <option value="last7">Last 7 days</option>
+                    <option value="last30">Last 30 days</option>
+                    <option value="thisMonth">This Month</option>
+                    <option value="lastMonth">Last Month</option>
+                </select>
+            </label>
+        </div>
+        <div>
+            <label>Date Filter Type
+                <select id="dateFilterType">
+                    <option value="created_at">created_at</option>
+                    <option value="updated_at">updated_at</option>
+                </select>
+            </label>
+        </div>
+        <div>
+            <label>Status (optional)
+                <input id="status" placeholder="e.g. completed" />
+            </label>
+        </div>
+        <div>
+            <label>Start
+                <input type="date" id="start" />
+            </label>
+            <label>End
+                <input type="date" id="end" />
+            </label>
+        </div>
+        <div style="align-self:end">
+            <button id="run">Run</button>
+            <button id="download" disabled>Download CSV</button>
+        </div>
+    </div>
+
+    <div style="margin-top:12px; border:1px solid #eee; padding:12px; max-width:980px">
+        <strong>Column configuration</strong>
+        <div id="columnConfig" style="margin-top:8px">
+            <!-- structured column checkboxes will be injected here -->
+        </div>
+        <div style="margin-top:8px">
+            <button id="selectAllCols">Select All</button>
+            <button id="selectNoneCols">Select None</button>
+            <small style="margin-left:8px;color:#666">Selection is saved in your browser.</small>
+        </div>
+    </div>
+
+    <div id="meta"></div>
+    <div id="preview"></div>
+
+    <script>
+        const COLUMNS = [
+            'Order #', 'Placed', 'Order Status', 'Line Item ID', 'Tracking #',
+            'Shipping Landded Cost', 'Ship Method', 'Ship Date',
+            'Product Personalization', 'Quantity', 'Product Name', 'Product Options',
+            'Billing Info', 'Shipping Info'
+        ];
+
+        const STRUCTURED_COLUMNS = [
+            'Billing Name', 'Billing Company', 'Billing Address1', 'Billing Address2', 'Billing City', 'Billing State', 'Billing Zip', 'Billing Country', 'Billing Email', 'Billing Phone',
+            'Shipping Name', 'Shipping Company', 'Shipping Address1', 'Shipping Address2', 'Shipping City', 'Shipping State', 'Shipping Zip', 'Shipping Country', 'Shipping Email', 'Shipping Phone'
+        ];
+
+        let fullResult = null;
+
+        function isoDate(d) { return new Date(d).toISOString(); }
+
+        function applyPreset(p) {
+            const today = new Date();
+            let start, end;
+            if (p === 'last7') {
+                end = new Date(today);
+                start = new Date(today);
+                start.setDate(start.getDate() - 7);
+            } else if (p === 'last30') {
+                end = new Date(today);
+                start = new Date(today);
+                start.setDate(start.getDate() - 30);
+            } else if (p === 'thisMonth') {
+                start = new Date(today.getFullYear(), today.getMonth(), 1);
+                end = new Date(today);
+            } else if (p === 'lastMonth') {
+                start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                end = new Date(today.getFullYear(), today.getMonth(), 0);
+            }
+            if (start && end) {
+                document.getElementById('start').value = start.toISOString().slice(0, 10);
+                document.getElementById('end').value = end.toISOString().slice(0, 10);
+            }
+        }
+
+        document.getElementById('datePreset').addEventListener('change', (e) => {
+            if (e.target.value === 'custom') return;
+            applyPreset(e.target.value);
+        });
+
+        document.getElementById('run').addEventListener('click', async () => {
+            const reportType = document.getElementById('reportType').value;
+            const dateFilterType = document.getElementById('dateFilterType').value;
+            const status = document.getElementById('status').value.trim();
+            const start = document.getElementById('start').value;
+            const end = document.getElementById('end').value;
+            const storeKey = document.getElementById('storeSelect').value;
+
+            const payload = { reportType, dateFilterType };
+            if (storeKey) payload.storeKey = storeKey;
+            if (status) payload.status = status;
+            if (start && end) { payload.start = start; payload.end = end; }
+
+            document.getElementById('run').disabled = true;
+            document.getElementById('meta').textContent = 'Running...';
+            try {
+                const res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!res.ok) throw new Error(await res.text());
+                const json = await res.json();
+                fullResult = json;
+                renderPreview(json);
+                document.getElementById('download').disabled = false;
+                document.getElementById('meta').textContent = `Orders: ${json.meta.orders}  Rows: ${json.meta.rows}`;
+            } catch (err) {
+                console.error(err);
+                document.getElementById('meta').textContent = 'Error: ' + err.message;
+            } finally {
+                document.getElementById('run').disabled = false;
+            }
+        });
+
+        function renderPreview(result) {
+            const preview = document.getElementById('preview');
+            preview.innerHTML = '';
+            // compute visible columns based on user selection
+            const visible = getVisibleColumns(result.columns);
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const tr = document.createElement('tr');
+            visible.forEach(c => { const th = document.createElement('th'); th.textContent = c; tr.appendChild(th); });
+            thead.appendChild(tr);
+            table.appendChild(thead);
+            const tbody = document.createElement('tbody');
+            const rows = result.rows.slice(0, 50);
+            rows.forEach(r => {
+                const tr = document.createElement('tr');
+                // render cells for visible columns only
+                visible.forEach(colName => {
+                    const idx = result.columns.indexOf(colName);
+                    const td = document.createElement('td');
+                    td.textContent = (idx >= 0 && r[idx] != null) ? r[idx] : '';
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+            preview.appendChild(table);
+        }
+
+        function escapeCsvCell(v) {
+            if (v == null) return '';
+            const s = String(v);
+            if (s.includes(',') || s.includes('\"') || s.includes('\n') || s.includes('\r') || s.includes('"')) {
+                return '"' + s.replace(/"/g, '""') + '"';
+            }
+            return s;
+        }
+
+        document.getElementById('download').addEventListener('click', () => {
+            if (!fullResult) return;
+            const rows = fullResult.rows;
+            const visible = getVisibleColumns(fullResult.columns);
+            const lines = [];
+            lines.push(visible.map(escapeCsvCell).join(','));
+            rows.forEach(r => {
+                const out = visible.map(colName => {
+                    const idx = fullResult.columns.indexOf(colName);
+                    return idx >= 0 ? escapeCsvCell(r[idx]) : '';
+                });
+                lines.push(out.join(','));
+            });
+            const csv = lines.join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'brightsites_export.csv';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        });
+
+        // load stores into selector
+        async function loadStores() {
+            try {
+                const res = await fetch('/api/stores');
+                const stores = await res.json();
+                const sel = document.getElementById('storeSelect');
+                sel.innerHTML = '';
+                stores.forEach(s => {
+                    const o = document.createElement('option');
+                    o.value = s.key;
+                    o.textContent = s.label + (s.subdomain ? ` (${s.subdomain})` : '');
+                    sel.appendChild(o);
+                });
+            } catch (err) {
+                console.error('loadStores', err);
+            }
+        }
+        loadStores();
+
+        // Column configuration: persist checkbox state in localStorage
+        const STORAGE_KEY = 'brightsites_structured_columns_v1';
+
+        function loadColumnPrefs() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (!raw) return null;
+                return JSON.parse(raw);
+            } catch (e) { return null; }
+        }
+
+        function saveColumnPrefs(prefs) {
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs)); } catch (e) { }
+        }
+
+        function getDefaultPrefs() {
+            const prefs = {};
+            STRUCTURED_COLUMNS.forEach(c => prefs[c] = true);
+            return prefs;
+        }
+
+        function getPrefs() {
+            return Object.assign({}, getDefaultPrefs(), loadColumnPrefs() || {});
+        }
+
+        function buildColumnConfigUI() {
+            const container = document.getElementById('columnConfig');
+            container.innerHTML = '';
+            const prefs = getPrefs();
+            STRUCTURED_COLUMNS.forEach(name => {
+                const id = 'col_' + name.replace(/\s+/g, '_');
+                const label = document.createElement('label');
+                label.style.display = 'inline-block';
+                label.style.marginRight = '12px';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox'; cb.id = id; cb.checked = !!prefs[name];
+                cb.addEventListener('change', () => {
+                    const p = getPrefs(); p[name] = cb.checked; saveColumnPrefs(p); if (fullResult) renderPreview(fullResult);
+                });
+                label.appendChild(cb);
+                const txt = document.createTextNode(' ' + name);
+                label.appendChild(txt);
+                container.appendChild(label);
+            });
+        }
+
+        document.getElementById('selectAllCols').addEventListener('click', () => { const p = getPrefs(); STRUCTURED_COLUMNS.forEach(c => p[c] = true); saveColumnPrefs(p); buildColumnConfigUI(); if (fullResult) renderPreview(fullResult); });
+        document.getElementById('selectNoneCols').addEventListener('click', () => { const p = getPrefs(); STRUCTURED_COLUMNS.forEach(c => p[c] = false); saveColumnPrefs(p); buildColumnConfigUI(); if (fullResult) renderPreview(fullResult); });
+
+        function getVisibleColumns(allColumns) {
+            const prefs = getPrefs();
+            return allColumns.filter(c => {
+                if (STRUCTURED_COLUMNS.includes(c)) return !!prefs[c];
+                return true;
+            });
+        }
+
+        // initial UI build
+        buildColumnConfigUI();
+    </script>
+</body>
+
+</html>
