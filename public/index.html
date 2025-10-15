@@ -120,13 +120,14 @@
     </div>
 
     <div id="meta"></div>
+    <div id="usage" style="margin-top:8px; font-size:13px; color:#333"></div>
     <div id="preview"></div>
 
     <script>
         const COLUMNS = [
             'Order #', 'Placed', 'Order Status', 'Line Item ID', 'Tracking #',
             'Shipping Landded Cost', 'Ship Method', 'Ship Date',
-            'Product Personalization', 'Quantity', 'Product Name', 'Product Options',
+            'Product Personalization', 'Original Quantity', 'Shipped Quantity', 'Product Name', 'SKU', 'Product Options',
             'Billing Info', 'Shipping Info'
         ];
 
@@ -286,11 +287,39 @@
                     o.textContent = s.label + (s.subdomain ? ` (${s.subdomain})` : '');
                     sel.appendChild(o);
                 });
+                sel.addEventListener('change', () => refreshUsage());
             } catch (err) {
                 console.error('loadStores', err);
             }
         }
         loadStores();
+
+        async function refreshUsage() {
+            const div = document.getElementById('usage');
+            const storeKey = document.getElementById('storeSelect').value;
+            if (!storeKey) { div.textContent = ''; return; }
+            div.textContent = 'Loading usage...';
+            try {
+                const res = await fetch(`/api/usage?store=${encodeURIComponent(storeKey)}`);
+                if (!res.ok) throw new Error(await res.text());
+                const json = await res.json();
+                const m = json.metrics || {}; // { count, remainingBeforeReserve, remainingTotalFree, overageCalls, overageCost }
+                // build a simple progress bar relative to freeLimit
+                const pct = m.freeLimit ? Math.min(100, Math.round((m.count / m.freeLimit) * 100)) : 0;
+                const barOuter = `<div style='background:#eee;height:10px;width:260px;position:relative;border-radius:4px;overflow:hidden;margin-top:4px'>` +
+                    `<div style='height:100%;width:${pct}%;background:${pct > 100 ? '#c00' : pct > 90 ? '#f90' : '#4caf50'}'></div>` +
+                    `</div>`;
+                div.innerHTML = `API Usage (Month ${json.month})<br>` +
+                    `Calls: <strong>${m.count}</strong> / ${m.freeLimit} free (reserve ${m.reserve}) | ` +
+                    `Remaining before reserve: <strong>${m.remainingBeforeReserve}</strong> | ` +
+                    `Remaining total free: <strong>${m.remainingTotalFree}</strong> | ` +
+                    `Overage calls: <strong style='color:${m.overageCalls ? "#c00" : "inherit"}'>${m.overageCalls}</strong> | ` +
+                    `Overage cost: <strong style='color:${m.overageCost ? "#c00" : "inherit"}'>$${m.overageCost.toFixed ? m.overageCost.toFixed(2) : m.overageCost}</strong>` +
+                    barOuter;
+            } catch (e) {
+                div.textContent = 'Usage error: ' + e.message;
+            }
+        }
 
         // Column configuration: persist checkbox state in localStorage
         const STORAGE_KEY = 'brightsites_structured_columns_v1';
@@ -299,6 +328,8 @@
             try {
                 const raw = localStorage.getItem(STORAGE_KEY);
                 if (!raw) return null;
+                // refresh usage after a run to reflect additional API calls
+                refreshUsage();
                 return JSON.parse(raw);
             } catch (e) { return null; }
         }
@@ -351,6 +382,8 @@
 
         // initial UI build
         buildColumnConfigUI();
+        // periodic refresh every 60s if a store selected
+        setInterval(() => { const sk = document.getElementById('storeSelect').value; if (sk) refreshUsage(); }, 60000);
     </script>
 </body>
 

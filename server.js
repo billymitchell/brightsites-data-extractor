@@ -16,6 +16,10 @@ app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;
+const usage = require('./lib/usage');
+const FREE_LIMIT = 30000; // per store per month free calls
+const RESERVE = 10000; // keep in reserve (avoid consuming these unless needed)
+const OVERAGE_RATE = 0.03; // cost per call beyond free tier
 
 // simple promise pool for concurrency-limited enrichment
 async function promisePool(items, worker, concurrency = 5) {
@@ -38,7 +42,7 @@ async function promisePool(items, worker, concurrency = 5) {
 const COLUMNS = [
   'Order #','Placed','Order Status','Line Item ID','Tracking #',
   'Shipping Landded Cost','Ship Method','Ship Date',
-  'Product Personalization','Quantity','Product Name','Product Options',
+  'Product Personalization','Original Quantity','Shipped Quantity','Product Name','SKU','Product Options',
   'Billing Info','Shipping Info'
 ];
 
@@ -240,122 +244,127 @@ app.post('/api/run', async (req, res) => {
       );
 
   enriched.forEach(({ order, line_items = [], shipments = [] }) => {
-        // if no line items, skip
-        line_items.forEach((li) => {
-          // find shipments that include this line item
-          const tracking = trackingForLineItem({ order, shipments }, li.id);
+        const placed = order.placed_at || order.created_at || '';
+        const liMap = new Map();
+        line_items.forEach(li => { if (li && li.id != null) liMap.set(String(li.id), li); });
 
-          // pick a representative shipment for costs/method/date
-          let representative = null;
-          // prefer shipment that references this line item
-          for (const s of shipments) {
-            const ids = (s.line_item_ids || []).map(String);
-            const sLineItems = (s.line_items || []).map((x) => String(x.id || x));
-            if (ids.includes(String(li.id)) || sLineItems.includes(String(li.id))) {
-              representative = s;
-              break;
+        shipments.forEach((s) => {
+          // Combine shipment line items from possible shapes
+          const rawObjEntries = (s.line_items || []).map(x => (typeof x === 'object') ? x : { id: x });
+          const rawIdEntries = (s.line_item_ids || []).map(x => ({ id: x }));
+          const combined = [...rawObjEntries, ...rawIdEntries];
+
+          // Aggregate by line item id to avoid duplicates and sum shipped quantities when present
+          const agg = new Map(); // liId -> { qtySum:number, hasQty:boolean, sample:entry }
+          combined.forEach((entry) => {
+            const liId = String(entry.id || entry.line_item_id || entry.item_id || '');
+            if (!liId) return;
+            const getVal = (obj, ...keys) => { for (const k of keys) { if (!obj) continue; const v = obj[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return ''; };
+            const rawQty = getVal(entry, 'quantity','qty','shipped_quantity','units','count','amount','shipped_qty');
+            const qtyNum = rawQty === '' ? null : Number(rawQty);
+            const prev = agg.get(liId) || { qtySum: 0, hasQty: false, sample: entry };
+            if (qtyNum != null && !Number.isNaN(qtyNum)) {
+              prev.qtySum += qtyNum;
+              prev.hasQty = true;
             }
-          }
-          if (!representative && shipments.length) representative = shipments[0];
+            prev.sample = prev.sample || entry;
+            agg.set(liId, prev);
+          });
 
-          const shippingLanded = (representative && (representative.landed_cost || representative.shipping_cost)) || order.shipping_total || '';
-          const shipMethod = (representative && (representative.shipping_method || order.shipping_method)) || '';
-          const shipDate = (representative && (representative.ship_date || representative.shipped_at)) || '';
+          // If shipment lists no items, skip
+          if (agg.size === 0) return;
 
-          const placed = order.placed_at || order.created_at || '';
-          const productPersonalization = formatProductPersonalization(li.product_personalizations || li.personalizations || li.personalization || li.product_personalization);
-          const quantity = li.quantity || '';
-          const productName = li.name || li.product_name || '';
-          const productOptions = formatProductOptions(li.options_text || li.product_options || li.options);
+          const shippingLanded = (s.landed_cost || s.shipping_cost || '') || order.shipping_total || '';
+          const shipMethod = (s.shipping_method || order.shipping_method) || '';
+          const shipDate = (s.ship_date || s.shipped_at) || '';
+          const tracking = (s.tracking_number || s.tracking || '') || '';
 
-          // Prefer the documented show-order fields (billing_contact, billing_address, shipping_contact, shipping_address)
-          const billingSrc = order.billing_contact || order.billing_address || order.billing || {};
-          // If billing_contact/address are objects nested under different keys, merge them as a defensive fallback
-          const billingMerged = Object.assign({}, order.billing || {}, order.billing_address || {}, order.billing_contact || {});
+          agg.forEach((info, liId) => {
+            const li = liMap.get(String(liId)) || { id: liId };
+            const pick = (obj, ...keys) => { for (const k of keys) { if (!obj) continue; const v = obj[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return ''; };
 
-          const shippingSrc = order.shipping_contact || order.shipping_address || order.shipping || {};
-          const shippingMerged = Object.assign({}, order.shipping || {}, order.shipping_address || {}, order.shipping_contact || {});
-          // pass representative shipment as extras so composeAddressBlob can use shipment address fallbacks
-          // Use merged objects so we capture any fields present under alternative keys
-          const billingInfo = composeAddressBlob(billingMerged, order, { order, role: 'billing' });
-          const shippingInfo = composeAddressBlob(shippingMerged, order, { shipment: representative, shipments, role: 'shipping' });
+            const productPersonalization = formatProductPersonalization(li.product_personalizations || li.personalizations || li.personalization || li.product_personalization);
+            const originalQty = li.quantity || '';
+            const shippedQty = info.hasQty ? String(info.qtySum) : '';
+            const productName = li.name || li.product_name || '';
+            const productOptions = formatProductOptions(li.options_text || li.product_options || li.options);
+            const sku = pick(li, 'final_sku','sku','product_sku','variant_sku','item_sku','sku_code','skuNumber','product_code','code');
 
-          // capture debug info for the first row to help diagnose empty billing/shipping
-          if (!debugInfo) {
-            debugInfo = {
-              order_id: order.order_id || order.id || null,
-              billingSrc,
-              shippingSrc,
-              representative: representative || null,
-              order_sample: {
-                customer: order.customer || null,
-                customer_email: order.customer_email || null,
-                billing: order.billing || null,
-                billing_address: order.billing_address || null,
-                shipping: order.shipping || null,
-                shipping_address: order.shipping_address || null,
-              }
-            };
-          }
+            // Contacts and addresses
+            const billingMerged = Object.assign({}, order.billing || {}, order.billing_address || {}, order.billing_contact || {});
+            const shippingMerged = Object.assign({}, order.shipping || {}, order.shipping_address || {}, order.shipping_contact || {});
+            const billingInfo = composeAddressBlob(billingMerged, order, { order, role: 'billing' });
+            const shippingInfo = composeAddressBlob(shippingMerged, order, { shipment: s, shipments, role: 'shipping' });
 
-          // helper to pick from merged sources with aliases
-          const pick = (obj, ...keys) => {
-            for (const k of keys) {
-              if (!obj) continue;
-              const v = obj[k];
-              if (v !== undefined && v !== null && String(v).trim() !== '') return v;
+            if (!debugInfo) {
+              const billingSrc = order.billing_contact || order.billing_address || order.billing || {};
+              const shippingSrc = order.shipping_contact || order.shipping_address || order.shipping || {};
+              debugInfo = {
+                order_id: order.order_id || order.id || null,
+                billingSrc,
+                shippingSrc,
+                representative: s || null,
+                order_sample: {
+                  customer: order.customer || null,
+                  customer_email: order.customer_email || null,
+                  billing: order.billing || null,
+                  billing_address: order.billing_address || null,
+                  shipping: order.shipping || null,
+                  shipping_address: order.shipping_address || null,
+                }
+              };
             }
-            return '';
-          };
 
-          // extract structured billing fields from billingMerged or order fallbacks
-          const billingFirst = pick(billingMerged, 'first_name','first','firstName','firstname');
-          const billingLast = pick(billingMerged, 'last_name','last','lastName','lastname');
-          const billingName = ((billingFirst || billingLast) ? `${billingFirst || ''} ${billingLast || ''}`.trim() : (pick(order, 'customer_name','customer','username') || ''));
-          const billingCompany = pick(billingMerged, 'company','business','org');
-          const billingAddress1 = pick(billingMerged, 'first_address','address1','firstAddress','address','street1');
-          const billingAddress2 = pick(billingMerged, 'second_address','address2','secondAddress','address_line_2','street2');
-          const billingCity = pick(billingMerged, 'city','town');
-          const billingState = pick(billingMerged, 'state','province','region');
-          const billingZip = pick(billingMerged, 'zip','postcode','postal_code');
-          const billingCountry = pick(billingMerged, 'country','country_name');
-          const billingEmail = pick(billingMerged, 'email','contact_email') || pick(order, 'customer_email','customer');
-          const billingPhone = pick(billingMerged, 'phone','telephone','contact_phone') || pick(order, 'customer_phone');
+            // structured fields
+            const billingFirst = pick(billingMerged, 'first_name','first','firstName','firstname');
+            const billingLast = pick(billingMerged, 'last_name','last','lastName','lastname');
+            const billingName = ((billingFirst || billingLast) ? `${billingFirst || ''} ${billingLast || ''}`.trim() : (pick(order, 'customer_name','customer','username') || ''));
+            const billingCompany = pick(billingMerged, 'company','business','org');
+            const billingAddress1 = pick(billingMerged, 'first_address','address1','firstAddress','address','street1');
+            const billingAddress2 = pick(billingMerged, 'second_address','address2','secondAddress','address_line_2','street2');
+            const billingCity = pick(billingMerged, 'city','town');
+            const billingState = pick(billingMerged, 'state','province','region');
+            const billingZip = pick(billingMerged, 'zip','postcode','postal_code');
+            const billingCountry = pick(billingMerged, 'country','country_name');
+            const billingEmail = pick(billingMerged, 'email','contact_email') || pick(order, 'customer_email','customer');
+            const billingPhone = pick(billingMerged, 'phone','telephone','contact_phone') || pick(order, 'customer_phone');
 
-          // extract structured shipping fields from shippingMerged or shipment/order fallbacks
-          const shippingFirst = pick(shippingMerged, 'first_name','first','firstName','firstname');
-          const shippingLast = pick(shippingMerged, 'last_name','last','lastName','lastname');
-          const shippingName = ((shippingFirst || shippingLast) ? `${shippingFirst || ''} ${shippingLast || ''}`.trim() : (pick(order, 'customer_name','customer','username') || ''));
-          const shippingCompany = pick(shippingMerged, 'company','business','org');
-          const shippingAddress1 = pick(shippingMerged, 'first_address','address1','firstAddress','address','street1');
-          const shippingAddress2 = pick(shippingMerged, 'second_address','address2','secondAddress','address_line_2','street2');
-          const shippingCity = pick(shippingMerged, 'city','town');
-          const shippingState = pick(shippingMerged, 'state','province','region');
-          const shippingZip = pick(shippingMerged, 'zip','postcode','postal_code');
-          const shippingCountry = pick(shippingMerged, 'country','country_name');
-          const shippingEmail = pick(shippingMerged, 'email','contact_email') || pick(order, 'customer_email','customer');
-          const shippingPhone = pick(shippingMerged, 'phone','telephone','contact_phone') || pick(order, 'customer_phone');
+            const shippingFirst = pick(shippingMerged, 'first_name','first','firstName','firstname');
+            const shippingLast = pick(shippingMerged, 'last_name','last','lastName','lastname');
+            const shippingName = ((shippingFirst || shippingLast) ? `${shippingFirst || ''} ${shippingLast || ''}`.trim() : (pick(order, 'customer_name','customer','username') || ''));
+            const shippingCompany = pick(shippingMerged, 'company','business','org');
+            const shippingAddress1 = pick(shippingMerged, 'first_address','address1','firstAddress','address','street1');
+            const shippingAddress2 = pick(shippingMerged, 'second_address','address2','secondAddress','address_line_2','street2');
+            const shippingCity = pick(shippingMerged, 'city','town');
+            const shippingState = pick(shippingMerged, 'state','province','region');
+            const shippingZip = pick(shippingMerged, 'zip','postcode','postal_code');
+            const shippingCountry = pick(shippingMerged, 'country','country_name');
+            const shippingEmail = pick(shippingMerged, 'email','contact_email') || pick(order, 'customer_email','customer');
+            const shippingPhone = pick(shippingMerged, 'phone','telephone','contact_phone') || pick(order, 'customer_phone');
 
-          rows.push([
-            String(order.order_id || order.id || ''),
-            placed,
-            order.status || '',
-            String(li.id || ''),
-            tracking,
-            shippingLanded,
-            shipMethod,
-            shipDate,
-            productPersonalization,
-            String(quantity),
-            productName,
-            productOptions,
-            billingInfo,
-            shippingInfo,
-            // structured billing
-            billingName, billingCompany, billingAddress1, billingAddress2, billingCity, billingState, billingZip, billingCountry, billingEmail, billingPhone,
-            // structured shipping
-            shippingName, shippingCompany, shippingAddress1, shippingAddress2, shippingCity, shippingState, shippingZip, shippingCountry, shippingEmail, shippingPhone,
-          ]);
+            rows.push([
+              String(order.order_id || order.id || ''),
+              placed,
+              order.status || '',
+              String(li.id || liId || ''),
+              tracking,
+              shippingLanded,
+              shipMethod,
+              shipDate,
+              productPersonalization,
+              String(originalQty),
+              String(shippedQty),
+              productName,
+              sku,
+              productOptions,
+              billingInfo,
+              shippingInfo,
+              // structured billing
+              billingName, billingCompany, billingAddress1, billingAddress2, billingCity, billingState, billingZip, billingCountry, billingEmail, billingPhone,
+              // structured shipping
+              shippingName, shippingCompany, shippingAddress1, shippingAddress2, shippingCity, shippingState, shippingZip, shippingCountry, shippingEmail, shippingPhone,
+            ]);
+          });
         });
       });
     } else {
@@ -380,8 +389,10 @@ app.post('/api/run', async (req, res) => {
           order.shipping_method || '',
           '', // Ship Date
           '', // Product Personalization
-          '', // Quantity
+          '', // Quantity (original ordered)
+          '', // Shipped Quantity
           '', // Product Name
+          '', // SKU
           '', // Product Options
           billingInfo,
           shippingInfo,
@@ -405,4 +416,32 @@ app.get('/api/stores', (req, res) => {
   // return as array of { key, label, subdomain }
   const out = Object.entries(stores).map(([k, v]) => ({ key: k, label: v.label || k, subdomain: v.subdomain }));
   res.json(out);
+});
+
+// Get usage metrics for all stores or a specific store for a month
+// GET /api/usage?month=YYYY-MM&store=token
+app.get('/api/usage', (req, res) => {
+  const month = req.query.month || usage.monthKey();
+  const storeKey = req.query.store;
+  const stores = getConfiguredStores();
+  const monthData = usage.getMonth(month);
+  const calc = (count) => usage.metricsFor(count, { freeLimit: FREE_LIMIT, reserve: RESERVE, rate: OVERAGE_RATE });
+  if (storeKey) {
+    const count = monthData[storeKey] || 0;
+    return res.json({ month, store: storeKey, metrics: calc(count) });
+  }
+  const all = {};
+  Object.keys(stores).forEach(k => { all[k] = calc(monthData[k] || 0); });
+  // include any orphaned tokens not currently in configured stores
+  Object.keys(monthData).forEach(k => { if (!all[k]) all[k] = calc(monthData[k]); });
+  res.json({ month, stores: all });
+});
+
+// Reset usage for a month (defaults current)
+// POST /api/usage/reset { month?: 'YYYY-MM' }
+app.post('/api/usage/reset', (req, res) => {
+  const body = req.body || {};
+  const month = body.month || usage.monthKey();
+  usage.reset(month);
+  res.json({ ok: true, month });
 });
