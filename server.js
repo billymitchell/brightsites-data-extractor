@@ -43,7 +43,7 @@ const COLUMNS = [
   'Order #','Placed','Order Status','Line Item ID','Tracking #',
   'Shipping Landded Cost','Ship Method','Ship Date',
   'Product Personalization','Original Quantity','Shipped Quantity','Product Name','SKU','Product Options',
-  'Billing Info','Shipping Info'
+  'Billing Month'
 ];
 
 // appended structured columns (kept after the required headers)
@@ -54,6 +54,21 @@ const STRUCTURED_COLUMNS = [
 
 // full columns exposed in API
 const ALL_COLUMNS = COLUMNS.concat(STRUCTURED_COLUMNS);
+
+// Format a date-like value to MM/DD/YYYY (no time). Returns '' if invalid/empty.
+function formatDateMDY(value) {
+  if (!value) return '';
+  try {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return '';
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${mm}/${dd}/${yyyy}`;
+  } catch (e) {
+    return '';
+  }
+}
 
 function formatProductOptions(opts) {
   if (!opts) return '';
@@ -149,13 +164,11 @@ app.post('/api/run', async (req, res) => {
       return res.status(400).json({ error: `storeKey '${String(storeKey)}' not found. Available stores: ${Object.keys(stores).join(', ')}` });
     }
     const storeOpts = { subdomain: store.subdomain, token: store.token };
-    const reportType = body.reportType || 'Needed Excel';
-    const dateFilterType = body.dateFilterType || 'created_at';
-    const status = body.status;
+    // Always use created_at for date filtering
+    const dateFilterType = 'created_at';
+  const status = body.status;
 
-    const params = {};
-    // status filter
-    if (status) params.status = status;
+  const params = {};
 
     // date range
     if (body.start && body.end) {
@@ -165,8 +178,28 @@ app.post('/api/run', async (req, res) => {
       params[toKey] = new Date(body.end).toISOString();
     }
 
-    // fetch all orders with pagination
-  const orders = await fetchAllPages('/orders', params, 200, storeOpts);
+    // Helper to safely build list of statuses (supports comma-separated string or array)
+    const parseStatuses = (s) => {
+      if (!s) return [];
+      if (Array.isArray(s)) return s.map(x => String(x).trim()).filter(Boolean);
+      if (typeof s === 'string') return s.split(',').map(x => x.trim()).filter(Boolean);
+      return [];
+    };
+
+    // fetch all orders with pagination (support multi-status by merging results)
+    let orders = [];
+    const statuses = parseStatuses(status);
+    if (statuses.length > 1) {
+      const baseParams = Object.assign({}, params);
+      const lists = await Promise.all(statuses.map(st => fetchAllPages('/orders', Object.assign({}, baseParams, { status: st }), 200, storeOpts)));
+      const dedup = new Map();
+      const keyOf = (o) => String(o && (o.order_id || o.id || o.orderNumber || o.number || ''));
+      lists.flat().forEach(o => { const k = keyOf(o); if (k && !dedup.has(k)) dedup.set(k, o); });
+      orders = Array.from(dedup.values());
+    } else {
+      if (statuses.length === 1) params.status = statuses[0];
+      orders = await fetchAllPages('/orders', params, 200, storeOpts);
+    }
 
     // compact snapshot of first order for debugging address fields (safe to JSON)
     let debugInfo = null;
@@ -225,7 +258,6 @@ app.post('/api/run', async (req, res) => {
 
   let rows = [];
 
-    if (reportType === 'Needed Excel') {
       // Enrich orders with line_items and shipments (concurrency-limited)
       const enriched = await promisePool(
         orders,
@@ -244,7 +276,7 @@ app.post('/api/run', async (req, res) => {
       );
 
   enriched.forEach(({ order, line_items = [], shipments = [] }) => {
-        const placed = order.placed_at || order.created_at || '';
+    const placed = formatDateMDY(order.placed_at || order.created_at);
         const liMap = new Map();
         line_items.forEach(li => { if (li && li.id != null) liMap.set(String(li.id), li); });
 
@@ -276,7 +308,7 @@ app.post('/api/run', async (req, res) => {
 
           const shippingLanded = (s.landed_cost || s.shipping_cost || '') || order.shipping_total || '';
           const shipMethod = (s.shipping_method || order.shipping_method) || '';
-          const shipDate = (s.ship_date || s.shipped_at) || '';
+          const shipDate = formatDateMDY(s.ship_date || s.shipped_at);
           const tracking = (s.tracking_number || s.tracking || '') || '';
 
           agg.forEach((info, liId) => {
@@ -293,8 +325,6 @@ app.post('/api/run', async (req, res) => {
             // Contacts and addresses
             const billingMerged = Object.assign({}, order.billing || {}, order.billing_address || {}, order.billing_contact || {});
             const shippingMerged = Object.assign({}, order.shipping || {}, order.shipping_address || {}, order.shipping_contact || {});
-            const billingInfo = composeAddressBlob(billingMerged, order, { order, role: 'billing' });
-            const shippingInfo = composeAddressBlob(shippingMerged, order, { shipment: s, shipments, role: 'shipping' });
 
             if (!debugInfo) {
               const billingSrc = order.billing_contact || order.billing_address || order.billing || {};
@@ -357,8 +387,7 @@ app.post('/api/run', async (req, res) => {
               productName,
               sku,
               productOptions,
-              billingInfo,
-              shippingInfo,
+              '', // Billing Month (blank)
               // structured billing
               billingName, billingCompany, billingAddress1, billingAddress2, billingCity, billingState, billingZip, billingCountry, billingEmail, billingPhone,
               // structured shipping
@@ -367,38 +396,6 @@ app.post('/api/run', async (req, res) => {
           });
         });
       });
-    } else {
-      // For other report types, return a simple one-row-per-order summary mapping some columns.
-      rows = orders.slice(0).map((order) => {
-        const billingInfo = composeAddressBlob(order.billing || order.billing_address || {}, order);
-        const shippingInfo = composeAddressBlob(order.shipping || order.shipping_address || {}, order);
-        // minimal structured fallbacks
-        const pick = (obj, ...keys) => { for (const k of keys) { if (!obj) continue; const v = obj[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return ''; };
-        const billingMerged = Object.assign({}, order.billing || {}, order.billing_address || {}, order.billing_contact || {});
-        const shippingMerged = Object.assign({}, order.shipping || {}, order.shipping_address || {}, order.shipping_contact || {});
-        const billingName = (pick(billingMerged,'first_name','first') || pick(order,'customer','username') || '');
-        const shippingName = (pick(shippingMerged,'first_name','first') || pick(order,'customer','username') || '');
-        const structured = [billingName,'','','','','','','', pick(billingMerged,'email','contact_email') || pick(order,'customer_email','customer'),'', shippingName,'','','','','','','', pick(shippingMerged,'email','contact_email') || pick(order,'customer_email','customer'),''];
-        return [
-          String(order.order_id || order.id || ''),
-          order.placed_at || order.created_at || '',
-          order.status || '',
-          '', // Line Item ID
-          '', // Tracking
-          order.shipping_total || '',
-          order.shipping_method || '',
-          '', // Ship Date
-          '', // Product Personalization
-          '', // Quantity (original ordered)
-          '', // Shipped Quantity
-          '', // Product Name
-          '', // SKU
-          '', // Product Options
-          billingInfo,
-          shippingInfo,
-        ].concat(structured);
-      });
-    }
 
     const meta = { orders: orders.length, rows: rows.length };
     if (debugInfo) meta.debug = debugInfo;
