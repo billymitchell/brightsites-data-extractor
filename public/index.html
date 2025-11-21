@@ -76,7 +76,8 @@
 
         <div>
             <label>Status (optional)
-                <select id="statusSelect" multiple size="8">
+                <select id="statusSelect" multiple size="9">
+                    <option value="all" selected>All</option>
                     <option value="New">New</option>
                     <option value="Billed">Billed</option>
                     <option value="Paid">Paid</option>
@@ -88,15 +89,15 @@
                     <option value="Canceled">Canceled</option>
                     <option value="MOAS Pending">MOAS Pending</option>
                 </select>
-                <small style="display:block;color:#666;margin-top:4px">Leave empty for all statuses</small>
+                <small style="display:block;color:#666;margin-top:4px">Use Cmd/Ctrl+Click to select multiple</small>
             </label>
         </div>
         <div>
-            <label>Start
-                <input type="date" id="start" />
+            <label>Start (required)
+                <input type="date" id="start" required />
             </label>
-            <label>End
-                <input type="date" id="end" />
+            <label>End (required)
+                <input type="date" id="end" required />
             </label>
         </div>
         <div style="align-self:end">
@@ -146,7 +147,13 @@
 
         document.getElementById('run').addEventListener('click', async () => {
             const statusEl = document.getElementById('statusSelect');
-            const statuses = Array.from(statusEl ? statusEl.selectedOptions : []).map(o => o.value);
+            let statuses = Array.from(statusEl ? statusEl.selectedOptions : []).map(o => o.value);
+
+            // If "all" is selected or nothing is selected, don't send status filter
+            if (statuses.includes('all') || statuses.length === 0) {
+                statuses = [];
+            }
+
             const start = document.getElementById('start').value;
             const end = document.getElementById('end').value;
             const storeKey = document.getElementById('storeSelect').value;
@@ -157,10 +164,18 @@
                 return;
             }
 
-            const payload = {};
-            if (storeKey) payload.storeKey = storeKey;
+            // require date range
+            if (!start || !end) {
+                document.getElementById('meta').textContent = 'Both start and end dates are required.';
+                return;
+            }
+
+            const payload = {
+                storeKey: storeKey,
+                start: start,
+                end: end
+            };
             if (statuses && statuses.length) payload.status = statuses.join(',');
-            if (start && end) { payload.start = start; payload.end = end; }
 
             document.getElementById('run').disabled = true;
             document.getElementById('meta').textContent = 'Running...';

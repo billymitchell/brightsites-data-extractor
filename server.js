@@ -170,13 +170,14 @@ app.post('/api/run', async (req, res) => {
 
   const params = {};
 
-    // date range
-    if (body.start && body.end) {
-      const fromKey = `${dateFilterType}_from`;
-      const toKey = `${dateFilterType}_to`;
-      params[fromKey] = new Date(body.start).toISOString();
-      params[toKey] = new Date(body.end).toISOString();
+    // date range (REQUIRED)
+    if (!body.start || !body.end) {
+      return res.status(400).json({ error: 'Both start and end dates are required to prevent returning all data.' });
     }
+    const fromKey = `${dateFilterType}_from`;
+    const toKey = `${dateFilterType}_to`;
+    params[fromKey] = new Date(body.start).toISOString();
+    params[toKey] = new Date(body.end).toISOString();
 
     // Helper to safely build list of statuses (supports comma-separated string or array)
     const parseStatuses = (s) => {
@@ -280,6 +281,9 @@ app.post('/api/run', async (req, res) => {
         const liMap = new Map();
         line_items.forEach(li => { if (li && li.id != null) liMap.set(String(li.id), li); });
 
+        // Track which line items have been included via shipments
+        const processedLineItems = new Set();
+
         shipments.forEach((s) => {
           // Combine shipment line items from possible shapes
           const rawObjEntries = (s.line_items || []).map(x => (typeof x === 'object') ? x : { id: x });
@@ -312,6 +316,7 @@ app.post('/api/run', async (req, res) => {
           const tracking = (s.tracking_number || s.tracking || '') || '';
 
           agg.forEach((info, liId) => {
+            processedLineItems.add(liId);
             const li = liMap.get(String(liId)) || { id: liId };
             const pick = (obj, ...keys) => { for (const k of keys) { if (!obj) continue; const v = obj[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return ''; };
 
@@ -394,6 +399,74 @@ app.post('/api/run', async (req, res) => {
               shippingName, shippingCompany, shippingAddress1, shippingAddress2, shippingCity, shippingState, shippingZip, shippingCountry, shippingEmail, shippingPhone,
             ]);
           });
+        });
+
+        // Add line items without shipments (they won't have tracking/ship info)
+        line_items.forEach((li) => {
+          if (!li || li.id == null) return;
+          const liId = String(li.id);
+          if (processedLineItems.has(liId)) return; // already included via shipment
+
+          const pick = (obj, ...keys) => { for (const k of keys) { if (!obj) continue; const v = obj[k]; if (v !== undefined && v !== null && String(v).trim() !== '') return v; } return ''; };
+
+          const productPersonalization = formatProductPersonalization(li.product_personalizations || li.personalizations || li.personalization || li.product_personalization);
+          const originalQty = li.quantity || '';
+          const productName = li.name || li.product_name || '';
+          const productOptions = formatProductOptions(li.options_text || li.product_options || li.options);
+          const sku = pick(li, 'final_sku','sku','product_sku','variant_sku','item_sku','sku_code','skuNumber','product_code','code');
+
+          // Contacts and addresses
+          const billingMerged = Object.assign({}, order.billing || {}, order.billing_address || {}, order.billing_contact || {});
+          const shippingMerged = Object.assign({}, order.shipping || {}, order.shipping_address || {}, order.shipping_contact || {});
+
+          // structured fields
+          const billingFirst = pick(billingMerged, 'first_name','first','firstName','firstname');
+          const billingLast = pick(billingMerged, 'last_name','last','lastName','lastname');
+          const billingName = ((billingFirst || billingLast) ? `${billingFirst || ''} ${billingLast || ''}`.trim() : (pick(order, 'customer_name','customer','username') || ''));
+          const billingCompany = pick(billingMerged, 'company','business','org');
+          const billingAddress1 = pick(billingMerged, 'first_address','address1','firstAddress','address','street1');
+          const billingAddress2 = pick(billingMerged, 'second_address','address2','secondAddress','address_line_2','street2');
+          const billingCity = pick(billingMerged, 'city','town');
+          const billingState = pick(billingMerged, 'state','province','region');
+          const billingZip = pick(billingMerged, 'zip','postcode','postal_code');
+          const billingCountry = pick(billingMerged, 'country','country_name');
+          const billingEmail = pick(billingMerged, 'email','contact_email') || pick(order, 'customer_email','customer');
+          const billingPhone = pick(billingMerged, 'phone','telephone','contact_phone') || pick(order, 'customer_phone');
+
+          const shippingFirst = pick(shippingMerged, 'first_name','first','firstName','firstname');
+          const shippingLast = pick(shippingMerged, 'last_name','last','lastName','lastname');
+          const shippingName = ((shippingFirst || shippingLast) ? `${shippingFirst || ''} ${shippingLast || ''}`.trim() : (pick(order, 'customer_name','customer','username') || ''));
+          const shippingCompany = pick(shippingMerged, 'company','business','org');
+          const shippingAddress1 = pick(shippingMerged, 'first_address','address1','firstAddress','address','street1');
+          const shippingAddress2 = pick(shippingMerged, 'second_address','address2','secondAddress','address_line_2','street2');
+          const shippingCity = pick(shippingMerged, 'city','town');
+          const shippingState = pick(shippingMerged, 'state','province','region');
+          const shippingZip = pick(shippingMerged, 'zip','postcode','postal_code');
+          const shippingCountry = pick(shippingMerged, 'country','country_name');
+          const shippingEmail = pick(shippingMerged, 'email','contact_email') || pick(order, 'customer_email','customer');
+          const shippingPhone = pick(shippingMerged, 'phone','telephone','contact_phone') || pick(order, 'customer_phone');
+
+          rows.push([
+            String(order.order_id || order.id || ''),
+            placed,
+            order.status || '',
+            liId,
+            '', // no tracking
+            '', // no shipping landed cost
+            '', // no ship method
+            '', // no ship date
+            productPersonalization,
+            String(originalQty),
+            '', // no shipped quantity
+            productName,
+            sku,
+            productOptions,
+            '', // Billing Month (blank)
+            // structured billing
+            billingName, billingCompany, billingAddress1, billingAddress2, billingCity, billingState, billingZip, billingCountry, billingEmail, billingPhone,
+            // structured shipping
+            shippingName, shippingCompany, shippingAddress1, shippingAddress2, shippingCity, shippingState, shippingZip, shippingCountry, shippingEmail, shippingPhone,
+          ]);
         });
       });
 
