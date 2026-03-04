@@ -46,6 +46,13 @@
         button {
             padding: 8px 12px
         }
+
+        .inline-check {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 0;
+        }
     </style>
 </head>
 
@@ -104,6 +111,12 @@
             <button id="run">Run</button>
             <button id="download" disabled>Download CSV</button>
         </div>
+        <div style="align-self:end">
+            <label class="inline-check">
+                <input type="checkbox" id="danielleFormat" />
+                Danielle's Format
+            </label>
+        </div>
     </div>
 
     <div id="meta"></div>
@@ -113,6 +126,38 @@
         // Column configuration and usage sections removed; preview uses all server-provided columns.
 
         let fullResult = null;
+        const DANIELLE_COLUMNS = [
+            'Order #',
+            'Placed',
+            'Order Status',
+            'Line Item ID',
+            'Billing Month',
+            'Tracking #',
+            'Product Personalization',
+            'Quantity',
+            'Shipping Company',
+            'Shipping Address 1',
+            'Shipping Address 2',
+            'Shipping City',
+            'Shipping State',
+            'Shipping Country',
+            'Shipping Zip Code',
+            'Product Name',
+            'Product Options',
+            'Award Level',
+            'Award Type',
+            'SKU',
+            'Unit Price',
+            'Total Price',
+            'Tax Total',
+            'Order Total'
+        ];
+        const DANIELLE_SOURCE_MAP = {
+            'Shipping Address 1': 'Shipping Address1',
+            'Shipping Address 2': 'Shipping Address2',
+            'Shipping Zip Code': 'Shipping Zip',
+            'Quantity': 'Original Quantity'
+        };
 
         function isoDate(d) { return new Date(d).toISOString(); }
 
@@ -198,8 +243,8 @@
         function renderPreview(result) {
             const preview = document.getElementById('preview');
             preview.innerHTML = '';
-            // show all columns returned by the server
-            const visible = result.columns;
+            const view = buildViewData(result);
+            const visible = view.columns;
             const table = document.createElement('table');
             const thead = document.createElement('thead');
             const tr = document.createElement('tr');
@@ -207,12 +252,10 @@
             thead.appendChild(tr);
             table.appendChild(thead);
             const tbody = document.createElement('tbody');
-            const rows = result.rows.slice(0, 50);
+            const rows = view.rows.slice(0, 50);
             rows.forEach(r => {
                 const tr = document.createElement('tr');
-                // render cells for visible columns only
-                visible.forEach(colName => {
-                    const idx = result.columns.indexOf(colName);
+                visible.forEach((colName, idx) => {
                     const td = document.createElement('td');
                     td.textContent = (idx >= 0 && r[idx] != null) ? r[idx] : '';
                     tr.appendChild(td);
@@ -221,6 +264,24 @@
             });
             table.appendChild(tbody);
             preview.appendChild(table);
+        }
+
+        function buildViewData(result) {
+            const useDanielle = document.getElementById('danielleFormat').checked;
+            if (!useDanielle) return { columns: result.columns, rows: result.rows };
+
+            const sourceIndexByName = {};
+            result.columns.forEach((name, idx) => { sourceIndexByName[name] = idx; });
+
+            const mappedRows = result.rows.map(r => {
+                return DANIELLE_COLUMNS.map(targetCol => {
+                    const sourceCol = DANIELLE_SOURCE_MAP[targetCol] || targetCol;
+                    const sourceIdx = sourceIndexByName[sourceCol];
+                    return (sourceIdx != null && sourceIdx >= 0 && r[sourceIdx] != null) ? r[sourceIdx] : '';
+                });
+            });
+
+            return { columns: DANIELLE_COLUMNS, rows: mappedRows };
         }
 
         function escapeCsvCell(v) {
@@ -234,15 +295,13 @@
 
         document.getElementById('download').addEventListener('click', () => {
             if (!fullResult) return;
-            const rows = fullResult.rows;
-            const visible = fullResult.columns;
+            const view = buildViewData(fullResult);
+            const rows = view.rows;
+            const visible = view.columns;
             const lines = [];
             lines.push(visible.map(escapeCsvCell).join(','));
             rows.forEach(r => {
-                const out = visible.map(colName => {
-                    const idx = fullResult.columns.indexOf(colName);
-                    return idx >= 0 ? escapeCsvCell(r[idx]) : '';
-                });
+                const out = visible.map((colName, idx) => idx >= 0 ? escapeCsvCell(r[idx]) : '');
                 lines.push(out.join(','));
             });
             const csv = lines.join('\n');
@@ -282,6 +341,10 @@
             }
         }
         loadStores();
+
+        document.getElementById('danielleFormat').addEventListener('change', () => {
+            if (fullResult) renderPreview(fullResult);
+        });
 
         // Column configuration removed; always show all columns returned by the server.
     </script>
