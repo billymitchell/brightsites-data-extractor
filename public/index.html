@@ -43,6 +43,12 @@
             overflow: auto
         }
 
+        #previewMeta {
+            margin-top: 12px;
+            color: #666;
+            font-size: 13px;
+        }
+
         button {
             padding: 8px 12px
         }
@@ -120,12 +126,14 @@
     </div>
 
     <div id="meta"></div>
+    <div id="previewMeta"></div>
     <div id="preview"></div>
 
     <script>
         // Column configuration and usage sections removed; preview uses all server-provided columns.
 
         let fullResult = null;
+        const PREVIEW_ROW_LIMIT = 50;
         const DANIELLE_COLUMNS = [
             'Order #',
             'Placed',
@@ -224,6 +232,7 @@
 
             document.getElementById('run').disabled = true;
             document.getElementById('meta').textContent = 'Running...';
+            document.getElementById('previewMeta').textContent = '';
             try {
                 const res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                 if (!res.ok) throw new Error(await res.text());
@@ -235,6 +244,7 @@
             } catch (err) {
                 console.error(err);
                 document.getElementById('meta').textContent = 'Error: ' + err.message;
+                document.getElementById('previewMeta').textContent = '';
             } finally {
                 document.getElementById('run').disabled = false;
             }
@@ -242,6 +252,7 @@
 
         function renderPreview(result) {
             const preview = document.getElementById('preview');
+            const previewMeta = document.getElementById('previewMeta');
             preview.innerHTML = '';
             const view = buildViewData(result);
             const visible = view.columns;
@@ -252,7 +263,12 @@
             thead.appendChild(tr);
             table.appendChild(thead);
             const tbody = document.createElement('tbody');
-            const rows = view.rows.slice(0, 50);
+            const rows = view.rows.slice(0, PREVIEW_ROW_LIMIT);
+            if (view.rows.length > PREVIEW_ROW_LIMIT) {
+                previewMeta.textContent = `Preview is truncated. Showing ${rows.length} of ${view.rows.length} rows. Download CSV to get the full result.`;
+            } else {
+                previewMeta.textContent = `Preview is showing all ${view.rows.length} rows returned by the server.`;
+            }
             rows.forEach(r => {
                 const tr = document.createElement('tr');
                 visible.forEach((colName, idx) => {
