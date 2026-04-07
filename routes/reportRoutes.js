@@ -1,19 +1,14 @@
 const express = require('express');
 
-const { ALL_COLUMNS } = require('../config/report');
-const { getRunContext } = require('../services/orderService');
-const { buildReportRows } = require('../services/reportRowBuilder');
+const { createJob, getJob, getJobResult, cancelJob } = require('../services/reportJobService');
 const { logError, logWarn } = require('../utils/logger');
 
 const router = express.Router();
 
 router.post('/run', async (req, res) => {
   try {
-    const { orders, debugInfo, storeOpts } = await getRunContext(req.body || {});
-    const report = await buildReportRows({ orders, storeOpts, debugInfo });
-    const meta = { orders: orders.length, rows: report.rows.length };
-    if (report.debugInfo) meta.debug = report.debugInfo;
-    return res.json({ columns: ALL_COLUMNS, rows: report.rows, meta });
+    const job = createJob(req.body || {});
+    return res.status(202).json(job);
   } catch (err) {
     const requestMeta = {
       method: req.method,
@@ -32,6 +27,42 @@ router.post('/run', async (req, res) => {
     logError('routes/reportRoutes.postRun', err, requestMeta);
     return res.status(500).json({ error: String(err) });
   }
+});
+
+router.get('/run/:jobId', (req, res) => {
+  const job = getJob(req.params.jobId);
+  if (!job) {
+    return res.status(404).json({ error: `Job '${req.params.jobId}' not found.` });
+  }
+  return res.json(job);
+});
+
+router.get('/run/:jobId/result', (req, res) => {
+  const payload = getJobResult(req.params.jobId);
+  if (!payload) {
+    return res.status(404).json({ error: `Job '${req.params.jobId}' not found.` });
+  }
+
+  const { job, result } = payload;
+  if (job.status === 'completed' && result) {
+    return res.json(result);
+  }
+  if (job.status === 'failed') {
+    return res.status(500).json({ error: job.error || 'Report job failed.', status: job.status });
+  }
+  if (job.status === 'canceled') {
+    return res.status(409).json({ error: 'Report job was canceled before completion.', status: job.status });
+  }
+
+  return res.status(409).json({ error: 'Report job is still running.', status: job.status });
+});
+
+router.post('/run/:jobId/cancel', (req, res) => {
+  const job = cancelJob(req.params.jobId);
+  if (!job) {
+    return res.status(404).json({ error: `Job '${req.params.jobId}' not found.` });
+  }
+  return res.json(job);
 });
 
 module.exports = router;

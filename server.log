@@ -6,3 +6,6 @@ Server listening on http://localhost:3000
 {"timestamp":"2026-04-06T20:54:08.148Z","level":"warn","scope":"lib/brightSites.init","message":"BRIGHTSITES_SUBDOMAIN or BRIGHTSITES_API_TOKEN not set in env","meta":{}}
 {"timestamp":"2026-04-06T20:54:08.208Z","level":"info","scope":"server.start","message":"Server listening on http://localhost:3000","meta":{"port":3000}}
 {"timestamp":"2026-04-06T20:59:46.605Z","level":"info","scope":"server.start","message":"Server listening on http://localhost:3000","meta":{"port":3000}}
+{"timestamp":"2026-04-07T15:32:53.460Z","level":"info","scope":"server.start","message":"Server listening on http://localhost:3000","meta":{"port":3000}}
+{"timestamp":"2026-04-07T15:38:04.026Z","level":"info","scope":"services/reportJobService.createJob","message":"Queued report job 4b9c66f4-36e3-4394-b5a4-34b8ff80ae27","meta":{"jobId":"4b9c66f4-36e3-4394-b5a4-34b8ff80ae27","storeKey":"aqhWruxzYxRUL7adhA_x"}}
+{"timestamp":"2026-04-07T15:38:37.392Z","level":"info","scope":"services/reportJobService.runJob","message":"Completed report job 4b9c66f4-36e3-4394-b5a4-34b8ff80ae27","meta":{"jobId":"4b9c66f4-36e3-4394-b5a4-34b8ff80ae27","storeKey":"aqhWruxzYxRUL7adhA_x","orders":153,"rows":263}}

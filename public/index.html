@@ -59,6 +59,79 @@
             gap: 6px;
             margin-top: 0;
         }
+
+        .job-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.68);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            z-index: 1000;
+        }
+
+        .job-overlay[hidden] {
+            display: none;
+        }
+
+        .job-card {
+            width: min(480px, 100%);
+            background: #fff;
+            border-radius: 18px;
+            padding: 28px 24px;
+            box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+            text-align: center;
+        }
+
+        .job-spinner {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: 4px solid #dbe4f0;
+            border-top-color: #0f766e;
+            margin: 0 auto 18px;
+            animation: spin 0.9s linear infinite;
+        }
+
+        .job-card h3 {
+            margin: 0 0 10px;
+            font-size: 22px;
+        }
+
+        .job-card p {
+            margin: 0;
+        }
+
+        .job-message {
+            color: #1f2937;
+            font-size: 15px;
+        }
+
+        .job-progress {
+            margin-top: 10px !important;
+            color: #5b6472;
+            font-size: 13px;
+            min-height: 18px;
+        }
+
+        .job-actions {
+            margin-top: 18px;
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        .job-actions button[disabled] {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
     </style>
 </head>
 
@@ -81,6 +154,7 @@
                     <option value="custom">Custom</option>
                     <option value="last7">Last 7 days</option>
                     <option value="last30">Last 30 days</option>
+                    <option value="yearToDate">Year to Date</option>
                     <option value="thisMonth">This Month</option>
                     <option value="lastMonth">Last Month</option>
                 </select>
@@ -128,12 +202,27 @@
     <div id="meta"></div>
     <div id="previewMeta"></div>
     <div id="preview"></div>
+    <div id="jobOverlay" class="job-overlay" hidden>
+        <div class="job-card">
+            <div id="jobSpinner" class="job-spinner" aria-hidden="true"></div>
+            <h3 id="jobTitle">Building report</h3>
+            <p id="jobMessage" class="job-message">Preparing your request.</p>
+            <p id="jobProgress" class="job-progress"></p>
+            <div class="job-actions">
+                <button id="cancelJob" type="button">Cancel</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         // Column configuration and usage sections removed; preview uses all server-provided columns.
 
         let fullResult = null;
+        let activeJobId = null;
+        let activeJobPollTimer = null;
+        let cancelRequested = false;
         const PREVIEW_ROW_LIMIT = 50;
+        const JOB_POLL_INTERVAL_MS = 1500;
         const DANIELLE_COLUMNS = [
             'Order #',
             'Placed',
@@ -166,8 +255,176 @@
             'Shipping Zip Code': 'Shipping Zip',
             'Quantity': 'Original Quantity'
         };
+        const runButton = document.getElementById('run');
+        const downloadButton = document.getElementById('download');
+        const metaEl = document.getElementById('meta');
+        const previewEl = document.getElementById('preview');
+        const previewMetaEl = document.getElementById('previewMeta');
+        const jobOverlayEl = document.getElementById('jobOverlay');
+        const jobSpinnerEl = document.getElementById('jobSpinner');
+        const jobTitleEl = document.getElementById('jobTitle');
+        const jobMessageEl = document.getElementById('jobMessage');
+        const jobProgressEl = document.getElementById('jobProgress');
+        const cancelJobButton = document.getElementById('cancelJob');
 
-        function isoDate(d) { return new Date(d).toISOString(); }
+        function setJobOverlayVisible(visible) {
+            jobOverlayEl.hidden = !visible;
+        }
+
+        function clearActiveJobPollTimer() {
+            if (!activeJobPollTimer) return;
+            clearTimeout(activeJobPollTimer);
+            activeJobPollTimer = null;
+        }
+
+        function setJobControlState() {
+            runButton.disabled = Boolean(activeJobId);
+            cancelJobButton.disabled = !activeJobId || cancelRequested;
+            cancelJobButton.textContent = cancelRequested ? 'Canceling...' : 'Cancel';
+        }
+
+        function resetResultState() {
+            fullResult = null;
+            downloadButton.disabled = true;
+            previewEl.innerHTML = '';
+            previewMetaEl.textContent = '';
+        }
+
+        function formatJobProgress(job) {
+            const progress = job && job.progress ? job.progress : {};
+            const parts = [];
+
+            if (typeof progress.ordersProcessed === 'number' && typeof progress.ordersTotal === 'number' && progress.ordersTotal > 0) {
+                parts.push(`${progress.ordersProcessed} of ${progress.ordersTotal} orders processed`);
+            } else if (typeof progress.ordersFetched === 'number' && progress.ordersFetched > 0) {
+                parts.push(`${progress.ordersFetched} orders fetched`);
+            }
+
+            if (typeof progress.rowsBuilt === 'number' && progress.rowsBuilt > 0) {
+                parts.push(`${progress.rowsBuilt} rows built`);
+            }
+
+            if (typeof progress.statusesTotal === 'number' && progress.statusesTotal > 1) {
+                const currentStatusIndex = progress.currentStatus
+                    ? Math.min(progress.statusesProcessed + 1, progress.statusesTotal)
+                    : Math.min(progress.statusesProcessed || 0, progress.statusesTotal);
+                if (currentStatusIndex > 0) {
+                    parts.push(`Status ${currentStatusIndex} of ${progress.statusesTotal}`);
+                }
+            }
+
+            return parts.join(' • ');
+        }
+
+        function getJobTitle(job) {
+            if (!job) return 'Building report';
+            if (job.status === 'queued') return 'Queued report';
+            if (job.status === 'canceling') return 'Canceling report';
+            if (job.status === 'completed') return 'Report ready';
+            if (job.status === 'failed') return 'Report failed';
+            if (job.status === 'canceled') return 'Report canceled';
+            return 'Building report';
+        }
+
+        function updateJobOverlay(job) {
+            jobTitleEl.textContent = getJobTitle(job);
+            jobMessageEl.textContent = (job && job.progress && job.progress.message) || 'Working...';
+            jobProgressEl.textContent = formatJobProgress(job);
+            cancelJobButton.hidden = !job || ['completed', 'failed', 'canceled'].includes(job.status);
+            jobSpinnerEl.hidden = job && ['completed', 'failed', 'canceled'].includes(job.status);
+            cancelRequested = Boolean(job && (job.cancelRequested || job.status === 'canceling'));
+            setJobControlState();
+        }
+
+        async function readErrorResponse(res) {
+            const text = await res.text();
+            if (!text) return `${res.status} ${res.statusText}`;
+            try {
+                const json = JSON.parse(text);
+                return json.error || text;
+            } catch (err) {
+                return text;
+            }
+        }
+
+        function completeActiveJob() {
+            activeJobId = null;
+            cancelRequested = false;
+            clearActiveJobPollTimer();
+            setJobControlState();
+        }
+
+        function activateJob(job) {
+            activeJobId = job.id;
+            cancelRequested = Boolean(job.cancelRequested);
+            setJobOverlayVisible(true);
+            updateJobOverlay(job);
+        }
+
+        async function loadCompletedJob(job) {
+            jobTitleEl.textContent = 'Report ready';
+            jobMessageEl.textContent = 'Loading completed report results.';
+            jobProgressEl.textContent = '';
+            cancelJobButton.hidden = true;
+            jobSpinnerEl.hidden = false;
+
+            const res = await fetch(job.resultUrl || `/api/run/${job.id}/result`);
+            if (!res.ok) throw new Error(await readErrorResponse(res));
+
+            const result = await res.json();
+            fullResult = result;
+            renderPreview(result);
+            downloadButton.disabled = false;
+            metaEl.textContent = `Orders: ${result.meta.orders}  Rows: ${result.meta.rows}`;
+            setJobOverlayVisible(false);
+            completeActiveJob();
+        }
+
+        async function pollJob(jobId) {
+            clearActiveJobPollTimer();
+            if (!jobId) return;
+
+            try {
+                const res = await fetch(`/api/run/${jobId}`);
+                if (!res.ok) throw new Error(await readErrorResponse(res));
+
+                const job = await res.json();
+                if (job.id !== activeJobId) return;
+
+                updateJobOverlay(job);
+
+                if (job.status === 'completed') {
+                    await loadCompletedJob(job);
+                    return;
+                }
+
+                if (job.status === 'failed') {
+                    setJobOverlayVisible(false);
+                    completeActiveJob();
+                    metaEl.textContent = `Error: ${job.error || 'Report job failed.'}`;
+                    previewMetaEl.textContent = '';
+                    return;
+                }
+
+                if (job.status === 'canceled') {
+                    setJobOverlayVisible(false);
+                    completeActiveJob();
+                    metaEl.textContent = 'Report canceled.';
+                    previewMetaEl.textContent = '';
+                    return;
+                }
+
+                activeJobPollTimer = setTimeout(() => {
+                    pollJob(jobId);
+                }, JOB_POLL_INTERVAL_MS);
+            } catch (err) {
+                console.error(err);
+                setJobOverlayVisible(false);
+                completeActiveJob();
+                metaEl.textContent = 'Error: ' + err.message;
+                previewMetaEl.textContent = '';
+            }
+        }
 
         function applyPreset(p) {
             const today = new Date();
@@ -180,6 +437,9 @@
                 end = new Date(today);
                 start = new Date(today);
                 start.setDate(start.getDate() - 30);
+            } else if (p === 'yearToDate') {
+                start = new Date(today.getFullYear(), 0, 1);
+                end = new Date(today);
             } else if (p === 'thisMonth') {
                 start = new Date(today.getFullYear(), today.getMonth(), 1);
                 end = new Date(today);
@@ -198,7 +458,9 @@
             applyPreset(e.target.value);
         });
 
-        document.getElementById('run').addEventListener('click', async () => {
+        runButton.addEventListener('click', async () => {
+            if (activeJobId) return;
+
             const statusEl = document.getElementById('statusSelect');
             let statuses = Array.from(statusEl ? statusEl.selectedOptions : []).map(o => o.value);
 
@@ -213,13 +475,13 @@
 
             // require explicit store selection
             if (!storeKey) {
-                document.getElementById('meta').textContent = 'Please select a store before running the report.';
+                metaEl.textContent = 'Please select a store before running the report.';
                 return;
             }
 
             // require date range
             if (!start || !end) {
-                document.getElementById('meta').textContent = 'Both start and end dates are required.';
+                metaEl.textContent = 'Both start and end dates are required.';
                 return;
             }
 
@@ -230,23 +492,21 @@
             };
             if (statuses && statuses.length) payload.status = statuses.join(',');
 
-            document.getElementById('run').disabled = true;
-            document.getElementById('meta').textContent = 'Running...';
-            document.getElementById('previewMeta').textContent = '';
+            resetResultState();
+            runButton.disabled = true;
+            metaEl.textContent = 'Queueing report job...';
             try {
                 const res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                if (!res.ok) throw new Error(await res.text());
-                const json = await res.json();
-                fullResult = json;
-                renderPreview(json);
-                document.getElementById('download').disabled = false;
-                document.getElementById('meta').textContent = `Orders: ${json.meta.orders}  Rows: ${json.meta.rows}`;
+                if (!res.ok) throw new Error(await readErrorResponse(res));
+                const job = await res.json();
+                activateJob(job);
+                metaEl.textContent = 'Report queued. This screen will update while it runs.';
+                pollJob(job.id);
             } catch (err) {
                 console.error(err);
-                document.getElementById('meta').textContent = 'Error: ' + err.message;
-                document.getElementById('previewMeta').textContent = '';
+                metaEl.textContent = 'Error: ' + err.message;
             } finally {
-                document.getElementById('run').disabled = false;
+                if (!activeJobId) setJobControlState();
             }
         });
 
@@ -309,7 +569,7 @@
             return s;
         }
 
-        document.getElementById('download').addEventListener('click', () => {
+        downloadButton.addEventListener('click', () => {
             if (!fullResult) return;
             const view = buildViewData(fullResult);
             const rows = view.rows;
@@ -330,6 +590,29 @@
             a.click();
             a.remove();
             URL.revokeObjectURL(url);
+        });
+
+        cancelJobButton.addEventListener('click', async () => {
+            if (!activeJobId || cancelRequested) return;
+
+            cancelRequested = true;
+            setJobControlState();
+            jobMessageEl.textContent = 'Cancel requested. Waiting for the active BrightSites request to finish.';
+            jobProgressEl.textContent = '';
+
+            try {
+                const res = await fetch(`/api/run/${activeJobId}/cancel`, { method: 'POST' });
+                if (!res.ok) throw new Error(await readErrorResponse(res));
+
+                const job = await res.json();
+                updateJobOverlay(job);
+                metaEl.textContent = 'Cancel requested. The job will stop after the current request finishes.';
+            } catch (err) {
+                console.error(err);
+                cancelRequested = false;
+                setJobControlState();
+                metaEl.textContent = 'Error canceling report: ' + err.message;
+            }
         });
 
         // load stores into selector
@@ -361,6 +644,8 @@
         document.getElementById('danielleFormat').addEventListener('change', () => {
             if (fullResult) renderPreview(fullResult);
         });
+
+        setJobControlState();
 
         // Column configuration removed; always show all columns returned by the server.
     </script>

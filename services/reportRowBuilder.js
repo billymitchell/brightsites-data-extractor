@@ -7,6 +7,7 @@ const {
 } = require('../utils/formatters');
 const { pickFirstValue } = require('../utils/fields');
 const { logWarn } = require('../utils/logger');
+const { throwIfCanceled } = require('../utils/cancel');
 
 function aggregateShipmentLineItems(shipment) {
   const rawObjEntries = (shipment.line_items || []).map((x) => (typeof x === 'object' ? x : { id: x }));
@@ -125,26 +126,63 @@ function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLande
   ];
 }
 
-async function buildReportRows({ orders, storeOpts, debugInfo }) {
+async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCanceled }) {
   let currentDebugInfo = debugInfo;
   const rows = [];
+  let ordersProcessed = 0;
+
+  if (typeof onProgress === 'function') {
+    onProgress({
+      phase: 'enriching-orders',
+      ordersProcessed: 0,
+      ordersTotal: orders.length,
+      message: orders.length > 0
+        ? `Loading full order details for ${orders.length} orders.`
+        : 'No orders matched the request.',
+    });
+  }
 
   const enriched = await promisePool(
     orders,
     async (order) => {
+      throwIfCanceled(isCanceled, 'Report job canceled while enriching orders.');
       const orderIdentifier = order.id || order.order_id || order.orderNumber || order.number;
       const [fullOrder, lineItems, shipments] = await Promise.all([
-        loadOrder(orderIdentifier, storeOpts),
-        loadLineItems(orderIdentifier, storeOpts),
-        loadShipments(orderIdentifier, storeOpts),
+        loadOrder(orderIdentifier, Object.assign({}, storeOpts, { isCanceled })),
+        loadLineItems(orderIdentifier, Object.assign({}, storeOpts, { isCanceled })),
+        loadShipments(orderIdentifier, Object.assign({}, storeOpts, { isCanceled })),
       ]);
       const mergedOrder = Object.assign({}, order, fullOrder || {});
+      ordersProcessed += 1;
+      if (typeof onProgress === 'function') {
+        onProgress({
+          phase: 'enriching-orders',
+          ordersProcessed,
+          ordersTotal: orders.length,
+          message: `Loaded order details for ${ordersProcessed} of ${orders.length} orders.`,
+        });
+      }
       return { order: mergedOrder, line_items: lineItems, shipments };
     },
-    5
+    5,
+    { stopOnError: true }
   );
 
+  if (typeof onProgress === 'function') {
+    onProgress({
+      phase: 'building-rows',
+      ordersProcessed: 0,
+      ordersTotal: enriched.length,
+      message: enriched.length > 0
+        ? `Building report rows from ${enriched.length} enriched orders.`
+        : 'Building report rows.',
+    });
+  }
+
+  let rowsBuiltFromOrders = 0;
+
   enriched.forEach((entry) => {
+    throwIfCanceled(isCanceled, 'Report job canceled while building rows.');
     if (entry && entry.error) {
       logWarn('services/reportRowBuilder.buildReportRows', 'Order enrichment failed inside promise pool', {
         error: entry.error,
@@ -223,6 +261,17 @@ async function buildReportRows({ orders, storeOpts, debugInfo }) {
         shippedQty: '',
       }));
     });
+
+    rowsBuiltFromOrders += 1;
+    if (typeof onProgress === 'function') {
+      onProgress({
+        phase: 'building-rows',
+        ordersProcessed: rowsBuiltFromOrders,
+        ordersTotal: enriched.length,
+        rowsBuilt: rows.length,
+        message: `Built rows for ${rowsBuiltFromOrders} of ${enriched.length} orders.`,
+      });
+    }
   });
 
   return {
