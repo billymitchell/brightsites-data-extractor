@@ -41,9 +41,14 @@ function createAuth({ password, secret, ttlMs = 8 * 3600 * 1000, secure = false,
   const cookieAttrs = `Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`;
 
   function sameOrigin(req) {
+    const site = req.headers['sec-fetch-site'];
+    if (site === 'same-origin' || site === 'none') return true;
     const origin = req.headers.origin;
     if (!origin) return true;
-    try { return new URL(origin).host === req.headers.host; } catch (e) { return false; }
+    try { return new URL(origin).host === req.headers.host; } catch (e) {
+      console.warn('Origin check failed: origin=%s host=%s site=%s', origin, req.headers.host, site);
+      return false;
+    }
   }
 
   function throttled(ip) {
