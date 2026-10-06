@@ -24,8 +24,9 @@ test('matches UPS tracking numbers and appends columns, one lookup per unique nu
   const rows = [['a', good], ['b', good], ['c', '9400111899223'], ['d', '']];
   const info = await ups.enrichRowsWithUps(rows, 1, { fetchImpl: fakeFetch(calls) });
   assert.strictEqual(info.lookedUp, 1);
-  assert.deepStrictEqual(rows[0].slice(2), ['Delivered', 'UPS Ground', '2.0 lbs', '01/05/2026']);
-  assert.deepStrictEqual(rows[2].slice(2), ['', '', '', '']);
+  assert.deepStrictEqual(rows[0].slice(2, 6), ['Delivered', 'UPS Ground', '2.0 lbs', '01/05/2026']);
+  assert.strictEqual(rows[0].length, 2 + ups.UPS_COLUMNS.length);
+  assert.deepStrictEqual(rows[2].slice(2), ups.UPS_COLUMNS.map(() => ''));
   assert.strictEqual(calls.filter((u) => u.includes('/track/')).length, 1);
 });
 
@@ -38,4 +39,23 @@ test('failed lookups do not break the report', async () => {
     await ups.enrichRowsWithUps(rows, 1, { fetchImpl: fakeFetch([]) });
   } finally { console.warn = orig; fs.appendFileSync = af; }
   assert.strictEqual(rows[0][2], 'Not found');
+});
+
+test('parses extra tracking fields from the UPS response shape', () => {
+  const r = ups.parseTrackResponse({ trackResponse: { shipment: [{ package: [{
+    currentStatus: { description: 'Delivered' },
+    activity: [{ date: '20260105', time: '143000' }],
+    deliveryDate: [{ type: 'DEL', date: '20260105' }],
+    deliveryTime: { type: 'DEL', endTime: '143000' },
+    deliveryInformation: { receivedBy: 'J DOE', location: 'Front Door' },
+    packageAddress: [
+      { type: 'ORIGIN', address: { city: 'Austin', stateProvince: 'TX', countryCode: 'US' } },
+      { type: 'DESTINATION', address: { city: 'London', countryCode: 'GB' } },
+    ],
+    referenceNumber: [{ number: 'PO123' }, { number: 'ORD9' }],
+    packageCount: 2, additionalServices: ['SIGNATURE_REQUIRED'],
+    dimension: { length: '10', width: '8', height: '4', unitOfDimension: 'IN' },
+    alternateTrackingNumber: [{ number: '9400' }],
+  }] }] } });
+  assert.deepStrictEqual(r.extra, ['01/05/2026 14:30', '01/05/2026', '14:30', 'J DOE', 'Front Door', 'Austin, TX, US', 'London, GB', 'PO123; ORD9', '2', 'SIGNATURE_REQUIRED', '10 x 8 x 4 in', '9400']);
 });
