@@ -66,6 +66,33 @@ function buildStructuredContactFields(order) {
   };
 }
 
+function toMoney(v) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function sumAdjustments(list, predicate) {
+  if (!Array.isArray(list)) return null;
+  const hits = list.filter((a) => a && predicate(String(a.note || '').toLowerCase()));
+  if (!hits.length) return null;
+  return hits.reduce((sum, a) => sum + toMoney(a.amount), 0).toFixed(2);
+}
+
+function extractOrderAmounts(order) {
+  const required = order.required_adjustments;
+  const discounts = ['coupons_adjustments', 'custom_adjustments', 'balance_adjustments']
+    .reduce((acc, key) => {
+      const list = Array.isArray(order[key]) ? order[key] : [];
+      return list.length ? (acc || 0) + list.reduce((sum, a) => sum + toMoney(a && a.amount), 0) : acc;
+    }, null);
+  return {
+    salesTax: sumAdjustments(required, (n) => n.includes('sales tax') && !n.includes('shipping')),
+    shippingTax: sumAdjustments(required, (n) => n.includes('shipping') && n.includes('tax')),
+    shipping: sumAdjustments(required, (n) => n === 'shipment' || n === 'shipping'),
+    discounts: discounts == null ? null : discounts.toFixed(2),
+  };
+}
+
 function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLanded, shipMethod, shipDate, shippedQty }) {
   const structured = buildStructuredContactFields(order);
   const productPersonalization = formatProductPersonalization(
@@ -88,9 +115,17 @@ function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLande
   );
   const unitPrice = pickFirstValue(lineItem, 'unit_price', 'unitPrice', 'price', 'price_each');
   const totalPrice = pickFirstValue(lineItem, 'total_price', 'totalPrice', 'line_total', 'extended_price');
-  const taxTotal = pickFirstValue(lineItem, 'tax_total', 'taxTotal', 'tax_amount', 'tax');
+  const taxTotal = pickFirstValue(lineItem, 'tax_price', 'tax_total', 'taxTotal', 'tax_amount', 'tax');
+  const amounts = extractOrderAmounts(order);
+  const payment = order.payment || (Array.isArray(order.payments) ? order.payments[0] : null) || {};
+  const logoCharges = Array.isArray(lineItem.logos)
+    ? lineItem.logos.reduce((sum, l) => sum + toMoney(l && l.charge), 0).toFixed(2)
+    : '';
   const orderTotal = pickFirstValue(order, 'order_total', 'orderTotal', 'grand_total', 'total');
-  const storeShippingCost = pickFirstValue(order, 'shipping_total', 'shipping_cost', 'shipping_amount', 'shipping_price');
+  const storeShippingCost = pickFirstValue(order.shipment || {}, 'cost')
+    || amounts.shipping
+    || pickFirstValue(order, 'shipping_total', 'shipping_cost', 'shipping_amount', 'shipping_price');
+  const val = (v) => (v == null ? '' : String(v));
 
   return [
     String(order.order_id || order.id || ''),
@@ -133,6 +168,24 @@ function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLande
     structured.shippingCountry,
     structured.shippingEmail,
     structured.shippingPhone,
+    pickFirstValue(order, 'item_total'),
+    val(amounts.salesTax),
+    val(amounts.shippingTax),
+    val(amounts.discounts),
+    pickFirstValue(order, 'customer_email'),
+    pickFirstValue(order, 'username'),
+    pickFirstValue(order, 'customer_id'),
+    pickFirstValue(payment.details || {}, 'method'),
+    pickFirstValue(payment, 'state'),
+    pickFirstValue(order.shipment || {}, 'in_hands_date') || pickFirstValue(order, 'in_hands_date'),
+    pickFirstValue(order, 'updated_at'),
+    pickFirstValue(lineItem, 'product_id'),
+    pickFirstValue(lineItem, 'final_internal_id'),
+    pickFirstValue(lineItem, 'tax_code'),
+    pickFirstValue(lineItem, 'product_price'),
+    pickFirstValue(lineItem, 'options_price'),
+    logoCharges,
+    pickFirstValue(lineItem, 'note'),
   ];
 }
 
@@ -298,4 +351,5 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
 
 module.exports = {
   buildReportRows,
+  extractOrderAmounts,
 };

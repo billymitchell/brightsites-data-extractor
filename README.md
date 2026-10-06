@@ -76,3 +76,8 @@ Click **Download support info** (top right of the page) to save a plain-text `su
 ## UPS tracking data (optional)
 
 Create an app at developer.ups.com with the Tracking API enabled, then set `UPS_CLIENT_ID` and `UPS_CLIENT_SECRET` (on Heroku: `heroku config:set ...`). Tick **Add UPS tracking data** before running a report. Each UPS tracking number (starting `1Z`) is looked up once and appended as `UPS Status`, `UPS Service`, `UPS Weight` and `Expected Delivery Date` columns; other carriers are left blank. Delivered results are cached for 24 hours, others for 15 minutes. A failed lookup shows `Lookup failed` and does not stop the report. UPS's Tracking API does not return billed shipping charges; those only come from UPS invoices.
+
+
+## Choosing columns
+
+Use **Choose report columns** in the UI to pick which fields appear in the preview and CSV (saved in your browser; "Core columns" restores the original set). Extra fields include order sales tax, shipping tax, discounts, customer email, payment method/status, in-hands date, product/internal IDs, tax code, base/options price, logo charges and line-item notes. Tax and shipping come from BrightSites `tax_price`, `shipment.cost` and `required_adjustments`.

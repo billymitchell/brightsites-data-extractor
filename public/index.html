@@ -12,6 +12,7 @@
         .app-header h1 { margin: 0; font-size: 1.6rem; }
         .app-header a[role=button] { margin: 0; width: auto; }
         .app-header form, .app-header button { margin: 0; width: auto; }
+        #columnGroups fieldset { margin-top: 1rem; } #columnGroups fieldset label { display: inline-block; width: 240px; margin-right: .5rem; }
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0 1rem; align-items: start; }
         .actions { display: flex; gap: .75rem; flex-wrap: wrap; }
         .actions button { width: auto; }
@@ -85,6 +86,16 @@
                 <input type="checkbox" id="includeUps" role="switch" />
                 Add UPS tracking data (status, service, weight, delivery date)
             </label>
+            <details id="columnPicker">
+                <summary>Choose report columns <small id="columnCount"></small></summary>
+                <div class="actions">
+                    <button type="button" class="secondary outline" id="colsAll">Select all</button>
+                    <button type="button" class="secondary outline" id="colsCore">Core columns</button>
+                    <button type="button" class="secondary outline" id="colsNone">Clear</button>
+                </div>
+                <small>Applies to the preview and CSV download. Not used with Danielle's Format.</small>
+                <div id="columnGroups"></div>
+            </details>
             <div class="actions">
                 <button id="run">Run</button>
                 <button id="download" class="secondary" disabled>Download CSV</button>
@@ -451,9 +462,75 @@
             preview.appendChild(table);
         }
 
+        const COLUMN_STORAGE_KEY = 'brightsites_deselected_columns_v2';
+        let deselectedColumns = new Set();
+        try { deselectedColumns = new Set(JSON.parse(localStorage.getItem(COLUMN_STORAGE_KEY) || '[]')); } catch (e) { /* ignore */ }
+        let columnCatalog = { groups: [], core: [] };
+
+        function saveColumnSelection() {
+            try { localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify([...deselectedColumns])); } catch (e) { /* ignore */ }
+            const total = columnCatalog.groups.reduce((n, g) => n + g.columns.length, 0);
+            document.getElementById('columnCount').textContent = total ? `(${total - deselectedColumns.size} of ${total} selected)` : '';
+            if (fullResult) renderPreview(fullResult);
+        }
+
+        function syncColumnCheckboxes() {
+            document.querySelectorAll('#columnGroups input[type=checkbox]').forEach(cb => { cb.checked = !deselectedColumns.has(cb.dataset.col); });
+        }
+
+        function setSelection(selectedNames) {
+            const all = columnCatalog.groups.flatMap(g => g.columns);
+            deselectedColumns = new Set(all.filter(c => !selectedNames.includes(c)));
+            syncColumnCheckboxes();
+            saveColumnSelection();
+        }
+
+        async function loadColumnPicker() {
+            try {
+                const res = await fetch('/api/columns');
+                if (!res.ok) return;
+                columnCatalog = await res.json();
+            } catch (err) { console.error('loadColumnPicker', err); return; }
+            const host = document.getElementById('columnGroups');
+            host.innerHTML = '';
+            columnCatalog.groups.forEach(group => {
+                const fs = document.createElement('fieldset');
+                const legend = document.createElement('legend');
+                legend.textContent = group.label;
+                fs.appendChild(legend);
+                group.columns.forEach(col => {
+                    const label = document.createElement('label');
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.dataset.col = col;
+                    cb.addEventListener('change', () => {
+                        if (cb.checked) deselectedColumns.delete(col); else deselectedColumns.add(col);
+                        saveColumnSelection();
+                    });
+                    label.appendChild(cb);
+                    label.appendChild(document.createTextNode(' ' + col));
+                    fs.appendChild(label);
+                });
+                host.appendChild(fs);
+            });
+            syncColumnCheckboxes();
+            saveColumnSelection();
+        }
+        document.getElementById('colsAll').addEventListener('click', () => setSelection(columnCatalog.groups.flatMap(g => g.columns)));
+        document.getElementById('colsNone').addEventListener('click', () => setSelection([]));
+        document.getElementById('colsCore').addEventListener('click', () => setSelection(columnCatalog.core));
+        loadColumnPicker();
+
         function buildViewData(result) {
             const useDanielle = document.getElementById('danielleFormat').checked;
-            if (!useDanielle) return { columns: result.columns, rows: result.rows };
+            if (!useDanielle) {
+                const keep = [];
+                result.columns.forEach((name, idx) => { if (!deselectedColumns.has(name)) keep.push(idx); });
+                return {
+                    columns: keep.map(i => result.columns[i]),
+                    rows: result.rows.map(r => keep.map(i => r[i]))
+                };
+            }
 
             const sourceIndexByName = {};
             result.columns.forEach((name, idx) => { sourceIndexByName[name] = idx; });
