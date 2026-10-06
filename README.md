@@ -82,3 +82,10 @@ Create an app at developer.ups.com with the Tracking API enabled, then set `UPS_
 ## Choosing columns
 
 Use **Choose report columns** in the UI to pick which fields appear in the preview and CSV (saved in your browser; "Core columns" restores the original set). Extra fields include order sales tax, shipping tax, discounts, customer email, payment method/status, in-hands date, product/internal IDs, tax code, base/options price, logo charges and line-item notes. Tax and shipping come from BrightSites `tax_price`, `shipment.cost` and `required_adjustments`.
+
+## Known issues / next session
+
+Review these at the start of the next session and decide whether to fix them:
+
+1. **Memory use on large reports.** Each finished report keeps its full rows plus the personalization/option detail in memory (`REPORT_JOB_MAX_RETAINED_RESULTS`, default 5, up to 50,000 rows each). On a 512 MB Basic dyno this can run out of memory. Suggested: lower the default to 2 or set `REPORT_JOB_MAX_RETAINED_RESULTS=2` on Heroku.
+2. **Multiple UPS tracking numbers in one cell.** The UPS lookup only matches a cell containing exactly one `1Z...` number, so a shipment with several tracking numbers gets blank UPS columns. Suggested: split the cell, look up each number, and join the results.
