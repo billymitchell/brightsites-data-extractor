@@ -16,7 +16,8 @@
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0 1rem; align-items: start; }
         .actions { display: flex; gap: .75rem; flex-wrap: wrap; }
         .actions button { width: auto; }
-        #statusSelect { height: auto; }
+        #statusGroup { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); column-gap: 1rem; }
+        #statusGroup legend, #statusGroup small { grid-column: 1 / -1; }
         #preview { max-height: 500px; overflow: auto; }
         #preview table { font-size: .8rem; margin: 0; }
         #previewMeta, #meta { color: var(--pico-muted-color); font-size: .85rem; margin: .5rem 0; }
@@ -61,23 +62,22 @@
                 <label>End (required)
                     <input type="date" id="end" required />
                 </label>
-                <label>Status (optional)
-                    <select id="statusSelect" multiple size="9">
-                        <option value="all" selected>All</option>
-                        <option value="New">New</option>
-                        <option value="Billed">Billed</option>
-                        <option value="Paid">Paid</option>
-                        <option value="In Progress">In Progress</option>
-                        <option value="Split">Split</option>
-                        <option value="Shipped">Shipped</option>
-                        <option value="Completed">Completed</option>
-                        <option value="Back Ordered">Back Ordered</option>
-                        <option value="Canceled">Canceled</option>
-                        <option value="MOAS Pending">MOAS Pending</option>
-                    </select>
-                    <small>Use Cmd/Ctrl+Click to select multiple</small>
-                </label>
+                
             </div>
+            <fieldset id="statusGroup">
+                    <legend>Status (optional)</legend>
+                        <label><input type="checkbox" name="status" value="New" /> New</label>
+                        <label><input type="checkbox" name="status" value="Billed" /> Billed</label>
+                        <label><input type="checkbox" name="status" value="Paid" /> Paid</label>
+                        <label><input type="checkbox" name="status" value="In Progress" /> In Progress</label>
+                        <label><input type="checkbox" name="status" value="Split" /> Split</label>
+                        <label><input type="checkbox" name="status" value="Shipped" /> Shipped</label>
+                        <label><input type="checkbox" name="status" value="Completed" /> Completed</label>
+                        <label><input type="checkbox" name="status" value="Back Ordered" /> Back Ordered</label>
+                        <label><input type="checkbox" name="status" value="Canceled" /> Canceled</label>
+                        <label><input type="checkbox" name="status" value="MOAS Pending" /> MOAS Pending</label>
+                    <small>Leave all unchecked for every status.</small>
+                </fieldset>
             <label>
                 <input type="checkbox" id="danielleFormat" role="switch" />
                 Danielle's Format
@@ -86,7 +86,7 @@
                 <input type="checkbox" id="includeUps" role="switch" />
                 Add UPS tracking data (status, service, weight, delivery date)
             </label>
-            <details id="columnPicker">
+            <details id="columnPicker" open>
                 <summary>Choose report columns <small id="columnCount"></small></summary>
                 <div class="actions">
                     <button type="button" class="secondary outline" id="colsAll">Select all</button>
@@ -380,8 +380,7 @@
         runButton.addEventListener('click', async () => {
             if (activeJobId) return;
 
-            const statusEl = document.getElementById('statusSelect');
-            let statuses = Array.from(statusEl ? statusEl.selectedOptions : []).map(o => o.value);
+            let statuses = Array.from(document.querySelectorAll('#statusGroup input[name=status]:checked')).map(o => o.value);
 
             // If "all" is selected or nothing is selected, don't send status filter
             if (statuses.includes('all') || statuses.length === 0) {
