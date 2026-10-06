@@ -2,6 +2,23 @@ const fs = require('fs');
 const path = require('path');
 
 const LOG_FILE = path.join(__dirname, '..', 'server.log');
+const BUFFER_SIZE = 500;
+const recent = [];
+const SENSITIVE_KEY = /token|password|secret|authorization|cookie/i;
+
+function redact(value, depth = 0) {
+  if (depth > 6 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((v) => redact(v, depth + 1));
+  const out = {};
+  Object.keys(value).forEach((k) => {
+    out[k] = SENSITIVE_KEY.test(k) ? '[hidden]' : redact(value[k], depth + 1);
+  });
+  return out;
+}
+
+function getRecentEntries(limit = BUFFER_SIZE) {
+  return recent.slice(-limit);
+}
 
 function serializeError(err) {
   if (!err) return null;
@@ -44,6 +61,10 @@ function write(level, scope, message, meta = {}) {
     meta,
   };
   const line = `${safeStringify(entry)}\n`;
+  try {
+    recent.push(JSON.parse(safeStringify(Object.assign({}, entry, { meta: redact(meta) }))));
+    if (recent.length > BUFFER_SIZE) recent.shift();
+  } catch (e) { /* buffer is best-effort */ }
 
   try {
     fs.appendFileSync(LOG_FILE, line, 'utf8');
@@ -74,4 +95,5 @@ module.exports = {
   logInfo,
   logWarn,
   logError,
+  getRecentEntries,
 };

@@ -18,6 +18,15 @@ function getConfiguredStores() {
       });
     }
   }
+  if (process.env.BRIGHTSITES_SUBDOMAIN && process.env.BRIGHTSITES_API_TOKEN) {
+    return {
+      default: {
+        subdomain: process.env.BRIGHTSITES_SUBDOMAIN,
+        token: process.env.BRIGHTSITES_API_TOKEN,
+        label: process.env.BRIGHTSITES_SUBDOMAIN,
+      },
+    };
+  }
   return {};
 }
 

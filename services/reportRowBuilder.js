@@ -86,6 +86,11 @@ function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLande
     'product_code',
     'code'
   );
+  const unitPrice = pickFirstValue(lineItem, 'unit_price', 'unitPrice', 'price', 'price_each');
+  const totalPrice = pickFirstValue(lineItem, 'total_price', 'totalPrice', 'line_total', 'extended_price');
+  const taxTotal = pickFirstValue(lineItem, 'tax_total', 'taxTotal', 'tax_amount', 'tax');
+  const orderTotal = pickFirstValue(order, 'order_total', 'orderTotal', 'grand_total', 'total');
+  const storeShippingCost = pickFirstValue(order, 'shipping_total', 'shipping_cost', 'shipping_amount', 'shipping_price');
 
   return [
     String(order.order_id || order.id || ''),
@@ -103,6 +108,11 @@ function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLande
     sku,
     productOptions,
     '',
+    unitPrice,
+    totalPrice,
+    taxTotal,
+    orderTotal,
+    storeShippingCost,
     structured.billingName,
     structured.billingCompany,
     structured.billingAddress1,
@@ -126,10 +136,16 @@ function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLande
   ];
 }
 
-async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCanceled }) {
+async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCanceled, maxRows = Infinity }) {
   let currentDebugInfo = debugInfo;
   const rows = [];
   let ordersProcessed = 0;
+  const appendRow = (row) => {
+    if (rows.length >= maxRows) {
+      throw new Error(`Report exceeds the maximum of ${maxRows} rows. Narrow the date range and try again.`);
+    }
+    rows.push(row);
+  };
 
   if (typeof onProgress === 'function') {
     onProgress({
@@ -230,7 +246,7 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
           };
         }
 
-        rows.push(buildRow({
+        appendRow(buildRow({
           order,
           placed,
           lineItemId: liId,
@@ -249,7 +265,7 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
       const liId = String(lineItem.id);
       if (processedLineItems.has(liId)) return;
 
-      rows.push(buildRow({
+      appendRow(buildRow({
         order,
         placed,
         lineItemId: liId,

@@ -1,14 +1,54 @@
 const { randomUUID } = require('crypto');
 
-const { ALL_COLUMNS } = require('../config/report');
+const { ALL_COLUMNS, MAX_REPORT_ROWS } = require('../config/report');
 const { getRunContext, validateRunRequest } = require('./orderService');
 const { buildReportRows } = require('./reportRowBuilder');
 const { createCanceledError, isCanceledError } = require('../utils/cancel');
 const { logError, logInfo } = require('../utils/logger');
 
+const ups = require('../lib/ups');
+
 const jobs = new Map();
+const HISTORY_LIMIT = 50;
+const history = [];
+
+function recordHistory(job) {
+  const started = Date.parse(job.startedAt || job.createdAt);
+  const ended = Date.parse(job.completedAt);
+  history.push({
+    id: job.id,
+    status: job.status,
+    storeKey: job.request.storeKey,
+    start: job.request.start,
+    end: job.request.end,
+    statusFilter: job.request.status,
+    createdAt: job.createdAt,
+    durationSec: Number.isNaN(ended - started) ? null : Math.round((ended - started) / 100) / 10,
+    orders: job.progress && job.progress.ordersTotal,
+    rows: job.progress && job.progress.rowsBuilt,
+    error: job.error,
+  });
+  if (history.length > HISTORY_LIMIT) history.shift();
+}
+
+function getJobHistory() {
+  return history.slice();
+}
 const JOB_TTL_MS = Math.max(60000, Number(process.env.REPORT_JOB_TTL_MS || 4 * 60 * 60 * 1000));
 const CLEANUP_INTERVAL_MS = Math.max(30000, Number(process.env.REPORT_JOB_CLEANUP_INTERVAL_MS || 10 * 60 * 1000));
+const MAX_ACTIVE_JOBS = Math.max(1, Number(process.env.REPORT_JOB_MAX_ACTIVE) || 2);
+const MAX_RETAINED_RESULTS = Math.max(1, Number(process.env.REPORT_JOB_MAX_RETAINED_RESULTS) || 5);
+
+function evictOldestCompletedResults() {
+  const completed = Array.from(jobs.entries())
+    .filter(([, job]) => job.status === 'completed' && job.result)
+    .sort((a, b) => Date.parse(a[1].completedAt) - Date.parse(b[1].completedAt));
+
+  while (completed.length > MAX_RETAINED_RESULTS) {
+    const [, oldestJob] = completed.shift();
+    oldestJob.result = null;
+  }
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -44,6 +84,7 @@ function serializeJob(job) {
     request: job.request,
     progress: job.progress,
     error: job.error,
+    resultAvailable: Boolean(job.result),
     statusUrl: `/api/run/${job.id}`,
     resultUrl: `/api/run/${job.id}/result`,
     cancelUrl: `/api/run/${job.id}/cancel`,
@@ -69,6 +110,7 @@ function finalizeCanceledJob(job, message) {
     phase: 'canceled',
     message: message || 'Report job canceled.',
   });
+  recordHistory(job);
 }
 
 async function runJob(job) {
@@ -98,25 +140,40 @@ async function runJob(job) {
       orders: context.orders,
       storeOpts: context.storeOpts,
       debugInfo: context.debugInfo,
+      maxRows: MAX_REPORT_ROWS,
       isCanceled: () => job.cancelRequested,
       onProgress: (progress) => updateJobProgress(job, progress),
     });
 
     if (job.cancelRequested) throw createCanceledError();
 
+    let columns = ALL_COLUMNS;
+    let upsInfo = null;
+    if (job.request.includeUps) {
+      if (!ups.isConfigured()) throw new Error('UPS lookup is not set up on this server (UPS_CLIENT_ID / UPS_CLIENT_SECRET missing).');
+      upsInfo = await ups.enrichRowsWithUps(report.rows, ALL_COLUMNS.indexOf('Tracking #'), {
+        isCanceled: () => job.cancelRequested,
+        onProgress: (progress) => updateJobProgress(job, progress),
+      });
+      columns = ALL_COLUMNS.concat(ups.UPS_COLUMNS);
+      if (job.cancelRequested) throw createCanceledError();
+    }
+
     const meta = {
       orders: context.orders.length,
       rows: report.rows.length,
     };
+    if (upsInfo) meta.ups = upsInfo;
     if (report.debugInfo) meta.debug = report.debugInfo;
 
     job.result = {
-      columns: ALL_COLUMNS,
+      columns,
       rows: report.rows,
       meta,
     };
     job.status = 'completed';
     job.completedAt = nowIso();
+    evictOldestCompletedResults();
     job.progress = createProgress({
       phase: 'completed',
       ordersProcessed: context.orders.length,
@@ -125,6 +182,7 @@ async function runJob(job) {
       message: `Report ready. ${report.rows.length} rows built from ${context.orders.length} orders.`,
     });
 
+    recordHistory(job);
     logInfo('services/reportJobService.runJob', `Completed report job ${job.id}`, {
       jobId: job.id,
       storeKey: job.request.storeKey,
@@ -149,6 +207,7 @@ async function runJob(job) {
       message: 'Report job failed.',
     });
 
+    recordHistory(job);
     logError('services/reportJobService.runJob', err, {
       jobId: job.id,
       storeKey: job.request.storeKey,
@@ -159,6 +218,13 @@ async function runJob(job) {
 function createJob(body = {}) {
   validateRunRequest(body);
   cleanupExpiredJobs();
+  const activeJobs = Array.from(jobs.values())
+    .filter((job) => ['queued', 'running', 'canceling'].includes(job.status)).length;
+  if (activeJobs >= MAX_ACTIVE_JOBS) {
+    const err = new Error(`Report job limit reached. Wait for an active job to finish (maximum ${MAX_ACTIVE_JOBS}).`);
+    err.statusCode = 429;
+    throw err;
+  }
 
   const job = {
     id: randomUUID(),
@@ -168,6 +234,7 @@ function createJob(body = {}) {
       start: body.start,
       end: body.end,
       status: body.status || '',
+      includeUps: body.includeUps === true,
     },
     createdAt: nowIso(),
     startedAt: null,
@@ -197,6 +264,7 @@ function createJob(body = {}) {
         phase: 'failed',
         message: 'Report job failed.',
       });
+      recordHistory(job);
       logError('services/reportJobService.runJobUnhandled', err, {
         jobId: job.id,
         storeKey: job.request.storeKey,
@@ -262,4 +330,5 @@ module.exports = {
   getJob,
   cancelJob,
   getJobResult,
+  getJobHistory,
 };

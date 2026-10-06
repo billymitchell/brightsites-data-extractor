@@ -1,220 +1,128 @@
 <!doctype html>
-<html>
+<html lang="en">
 
 <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BrightSites Exporter</title>
+    <link rel="stylesheet" href="/vendor/pico.min.css" />
     <style>
-        body {
-            font-family: system-ui, -apple-system, Arial;
-            margin: 24px;
-        }
-
-        label {
-            display: block;
-            margin-top: 8px
-        }
-
-        .controls {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap
-        }
-
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 12px
-        }
-
-        th,
-        td {
-            border: 1px solid #ddd;
-            padding: 6px;
-            font-size: 13px
-        }
-
-        th {
-            background: #f3f3f3
-        }
-
-        #preview {
-            max-height: 500px;
-            overflow: auto
-        }
-
-        #previewMeta {
-            margin-top: 12px;
-            color: #666;
-            font-size: 13px;
-        }
-
-        button {
-            padding: 8px 12px
-        }
-
-        .inline-check {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            margin-top: 0;
-        }
-
-        .job-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(15, 23, 42, 0.68);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
-            z-index: 1000;
-        }
-
-        .job-overlay[hidden] {
-            display: none;
-        }
-
-        .job-card {
-            width: min(480px, 100%);
-            background: #fff;
-            border-radius: 18px;
-            padding: 28px 24px;
-            box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
-            text-align: center;
-        }
-
-        .job-spinner {
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            border: 4px solid #dbe4f0;
-            border-top-color: #0f766e;
-            margin: 0 auto 18px;
-            animation: spin 0.9s linear infinite;
-        }
-
-        .job-card h3 {
-            margin: 0 0 10px;
-            font-size: 22px;
-        }
-
-        .job-card p {
-            margin: 0;
-        }
-
-        .job-message {
-            color: #1f2937;
-            font-size: 15px;
-        }
-
-        .job-progress {
-            margin-top: 10px !important;
-            color: #5b6472;
-            font-size: 13px;
-            min-height: 18px;
-        }
-
-        .job-actions {
-            margin-top: 18px;
-            display: flex;
-            justify-content: center;
-            gap: 12px;
-        }
-
-        .job-actions button[disabled] {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
+        :root { --pico-font-size: 95%; }
+        .app-header { margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; }
+        .app-header h1 { margin: 0; font-size: 1.6rem; }
+        .app-header a[role=button] { margin: 0; width: auto; }
+        .app-header form, .app-header button { margin: 0; width: auto; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0 1rem; align-items: start; }
+        .actions { display: flex; gap: .75rem; flex-wrap: wrap; }
+        .actions button { width: auto; }
+        #statusSelect { height: auto; }
+        #preview { max-height: 500px; overflow: auto; }
+        #preview table { font-size: .8rem; margin: 0; }
+        #previewMeta, #meta { color: var(--pico-muted-color); font-size: .85rem; margin: .5rem 0; }
+        .job-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, .68); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 1000; }
+        .job-overlay[hidden] { display: none; }
+        .job-card { width: min(480px, 100%); text-align: center; margin: 0; }
+        .job-spinner { width: 44px; height: 44px; border-radius: 50%; border: 4px solid var(--pico-muted-border-color); border-top-color: var(--pico-primary); margin: 0 auto 18px; animation: spin .9s linear infinite; }
+        .job-card h3 { margin-bottom: .5rem; }
+        .job-card p { margin: 0; }
+        .job-progress { margin-top: 10px !important; color: var(--pico-muted-color); font-size: .85rem; min-height: 18px; }
+        .job-actions { margin-top: 1.2rem; display: flex; justify-content: center; }
+        .job-actions button { width: auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 
 <body>
-    <h2>BrightSites CSV Export</h2>
-    <div class="controls">
-        <div>
-            <label>Store
-                <select id="storeSelect">
-                    <option>Loading...</option>
-                </select>
-            </label>
-        </div>
-        <div>
+    <main class="container">
+        <header class="app-header">
+            <h1>BrightSites CSV Export</h1>
+            <div class="actions"><a href="/api/diagnostics/report" role="button" class="outline secondary" download>Download support info</a><form method="post" action="/logout"><button type="submit" class="outline secondary">Sign out</button></form></div>
+        </header>
 
-        </div>
-        <div>
-            <label>Date Preset
-                <select id="datePreset">
-                    <option value="custom">Custom</option>
-                    <option value="last7">Last 7 days</option>
-                    <option value="last30">Last 30 days</option>
-                    <option value="yearToDate">Year to Date</option>
-                    <option value="thisMonth">This Month</option>
-                    <option value="lastMonth">Last Month</option>
-                </select>
-            </label>
-        </div>
-
-        <div>
-            <label>Status (optional)
-                <select id="statusSelect" multiple size="9">
-                    <option value="all" selected>All</option>
-                    <option value="New">New</option>
-                    <option value="Billed">Billed</option>
-                    <option value="Paid">Paid</option>
-                    <option value="In Progress">In Progress</option>
-                    <option value="Split">Split</option>
-                    <option value="Shipped">Shipped</option>
-                    <option value="Completed">Completed</option>
-                    <option value="Back Ordered">Back Ordered</option>
-                    <option value="Canceled">Canceled</option>
-                    <option value="MOAS Pending">MOAS Pending</option>
-                </select>
-                <small style="display:block;color:#666;margin-top:4px">Use Cmd/Ctrl+Click to select multiple</small>
-            </label>
-        </div>
-        <div>
-            <label>Start (required)
-                <input type="date" id="start" required />
-            </label>
-            <label>End (required)
-                <input type="date" id="end" required />
-            </label>
-        </div>
-        <div style="align-self:end">
-            <button id="run">Run</button>
-            <button id="download" disabled>Download CSV</button>
-        </div>
-        <div style="align-self:end">
-            <label class="inline-check">
-                <input type="checkbox" id="danielleFormat" />
+        <article>
+            <div class="form-grid">
+                <label>Store
+                    <select id="storeSelect"><option>Loading...</option></select>
+                </label>
+                <label>Date Preset
+                    <select id="datePreset">
+                        <option value="custom">Custom</option>
+                        <option value="last7">Last 7 days</option>
+                        <option value="last30">Last 30 days</option>
+                        <option value="yearToDate">Year to Date</option>
+                        <option value="thisMonth">This Month</option>
+                        <option value="lastMonth">Last Month</option>
+                    </select>
+                </label>
+                <label>Start (required)
+                    <input type="date" id="start" required />
+                </label>
+                <label>End (required)
+                    <input type="date" id="end" required />
+                </label>
+                <label>Status (optional)
+                    <select id="statusSelect" multiple size="9">
+                        <option value="all" selected>All</option>
+                        <option value="New">New</option>
+                        <option value="Billed">Billed</option>
+                        <option value="Paid">Paid</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="Split">Split</option>
+                        <option value="Shipped">Shipped</option>
+                        <option value="Completed">Completed</option>
+                        <option value="Back Ordered">Back Ordered</option>
+                        <option value="Canceled">Canceled</option>
+                        <option value="MOAS Pending">MOAS Pending</option>
+                    </select>
+                    <small>Use Cmd/Ctrl+Click to select multiple</small>
+                </label>
+            </div>
+            <label>
+                <input type="checkbox" id="danielleFormat" role="switch" />
                 Danielle's Format
             </label>
-        </div>
-    </div>
+            <label>
+                <input type="checkbox" id="includeUps" role="switch" />
+                Add UPS tracking data (status, service, weight, delivery date)
+            </label>
+            <div class="actions">
+                <button id="run">Run</button>
+                <button id="download" class="secondary" disabled>Download CSV</button>
+            </div>
+        </article>
 
-    <div id="meta"></div>
-    <div id="previewMeta"></div>
-    <div id="preview"></div>
+        <div id="meta"></div>
+        <div id="previewMeta"></div>
+        <div id="preview"></div>
+    </main>
+
     <div id="jobOverlay" class="job-overlay" hidden>
-        <div class="job-card">
+        <article class="job-card" role="dialog" aria-modal="true" aria-labelledby="jobTitle">
             <div id="jobSpinner" class="job-spinner" aria-hidden="true"></div>
             <h3 id="jobTitle">Building report</h3>
             <p id="jobMessage" class="job-message">Preparing your request.</p>
             <p id="jobProgress" class="job-progress"></p>
             <div class="job-actions">
-                <button id="cancelJob" type="button">Cancel</button>
+                <button id="cancelJob" type="button" class="secondary">Cancel</button>
             </div>
-        </div>
+        </article>
     </div>
 
+    <script src="/csv.js"></script>
     <script>
+        const _origFetch = window.fetch.bind(window);
+        window.fetch = async (...args) => {
+            const r = await _origFetch(...args);
+            if (r.status === 401) { window.location.href = '/login'; }
+            return r;
+        };
+        let clientEventsSent = 0;
+        function reportClientError(message) {
+            if (clientEventsSent++ >= 10) return;
+            _origFetch('/api/diagnostics/client-event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, page: location.pathname }) }).catch(() => {});
+        }
+        window.addEventListener('error', (e) => reportClientError(e.message));
+        window.addEventListener('unhandledrejection', (e) => reportClientError(String(e.reason)));
         // Column configuration and usage sections removed; preview uses all server-provided columns.
 
         let fullResult = null;
@@ -490,6 +398,7 @@
                 start: start,
                 end: end
             };
+            if (document.getElementById('includeUps').checked) payload.includeUps = true;
             if (statuses && statuses.length) payload.status = statuses.join(',');
 
             resetResultState();
@@ -549,24 +458,17 @@
             const sourceIndexByName = {};
             result.columns.forEach((name, idx) => { sourceIndexByName[name] = idx; });
 
+            const upsCols = result.columns.filter(c => c.startsWith('UPS ') || c === 'Expected Delivery Date');
+            const targetColumns = DANIELLE_COLUMNS.concat(upsCols);
             const mappedRows = result.rows.map(r => {
-                return DANIELLE_COLUMNS.map(targetCol => {
+                return targetColumns.map(targetCol => {
                     const sourceCol = DANIELLE_SOURCE_MAP[targetCol] || targetCol;
                     const sourceIdx = sourceIndexByName[sourceCol];
                     return (sourceIdx != null && sourceIdx >= 0 && r[sourceIdx] != null) ? r[sourceIdx] : '';
                 });
             });
 
-            return { columns: DANIELLE_COLUMNS, rows: mappedRows };
-        }
-
-        function escapeCsvCell(v) {
-            if (v == null) return '';
-            const s = String(v);
-            if (s.includes(',') || s.includes('\"') || s.includes('\n') || s.includes('\r') || s.includes('"')) {
-                return '"' + s.replace(/"/g, '""') + '"';
-            }
-            return s;
+            return { columns: targetColumns, rows: mappedRows };
         }
 
         downloadButton.addEventListener('click', () => {
@@ -575,9 +477,9 @@
             const rows = view.rows;
             const visible = view.columns;
             const lines = [];
-            lines.push(visible.map(escapeCsvCell).join(','));
+            lines.push(visible.map(BrightSitesCsv.escapeCsvCell).join(','));
             rows.forEach(r => {
-                const out = visible.map((colName, idx) => idx >= 0 ? escapeCsvCell(r[idx]) : '');
+                const out = visible.map((colName, idx) => idx >= 0 ? BrightSitesCsv.escapeCsvCell(r[idx]) : '');
                 lines.push(out.join(','));
             });
             const csv = lines.join('\n');

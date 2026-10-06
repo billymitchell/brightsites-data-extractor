@@ -53,6 +53,9 @@ router.get('/run/:jobId/result', (req, res) => {
   if (job.status === 'canceled') {
     return res.status(409).json({ error: 'Report job was canceled before completion.', status: job.status });
   }
+  if (job.status === 'completed' && !result) {
+    return res.status(410).json({ error: 'Report result expired because the retained-results limit was reached.', status: job.status });
+  }
 
   return res.status(409).json({ error: 'Report job is still running.', status: job.status });
 });

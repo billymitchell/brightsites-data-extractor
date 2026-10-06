@@ -114,10 +114,23 @@ function validateRunRequest(body = {}) {
     throw createHttpError(400, 'Both start and end dates are required to prevent returning all data.');
   }
 
+  const startDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(body.start);
+  const endDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(body.end);
   const startDate = new Date(body.start);
-  const endDate = new Date(body.end);
+  const endDate = endDateOnly
+    ? new Date(`${body.end}T23:59:59.999Z`)
+    : new Date(body.end);
   if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
     throw createHttpError(400, 'Start and end must be valid dates.');
+  }
+  if (
+    (startDateOnly && startDate.toISOString().slice(0, 10) !== body.start) ||
+    (endDateOnly && endDate.toISOString().slice(0, 10) !== body.end)
+  ) {
+    throw createHttpError(400, 'Start and end must be valid dates.');
+  }
+  if (endDate < startDate) {
+    throw createHttpError(400, 'End date must be on or after the start date.');
   }
 
   const storeOpts = { subdomain: store.subdomain, token: store.token };
