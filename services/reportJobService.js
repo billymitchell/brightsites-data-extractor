@@ -169,6 +169,7 @@ async function runJob(job) {
     job.result = {
       columns,
       rows: report.rows,
+      rowDetails: report.rowDetails,
       meta,
     };
     job.status = 'completed';

@@ -4,6 +4,8 @@ const {
   formatDateMDY,
   formatProductOptions,
   formatProductPersonalization,
+  extractOptionPairs,
+  extractPersonalizationPairs,
 } = require('../utils/formatters');
 const { pickFirstValue } = require('../utils/fields');
 const { logWarn } = require('../utils/logger');
@@ -90,6 +92,15 @@ function extractOrderAmounts(order) {
     shippingTax: sumAdjustments(required, (n) => n.includes('shipping') && n.includes('tax')),
     shipping: sumAdjustments(required, (n) => n === 'shipment' || n === 'shipping'),
     discounts: discounts == null ? null : discounts.toFixed(2),
+  };
+}
+
+function buildRowDetails(lineItem) {
+  return {
+    personalization: extractPersonalizationPairs(
+      lineItem.product_personalizations || lineItem.personalizations || lineItem.personalization || lineItem.product_personalization
+    ),
+    options: extractOptionPairs(lineItem.options_text || lineItem.product_options || lineItem.options),
   };
 }
 
@@ -192,12 +203,14 @@ function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLande
 async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCanceled, maxRows = Infinity }) {
   let currentDebugInfo = debugInfo;
   const rows = [];
+  const rowDetails = [];
   let ordersProcessed = 0;
-  const appendRow = (row) => {
+  const appendRow = (row, lineItem) => {
     if (rows.length >= maxRows) {
       throw new Error(`Report exceeds the maximum of ${maxRows} rows. Narrow the date range and try again.`);
     }
     rows.push(row);
+    rowDetails.push(buildRowDetails(lineItem));
   };
 
   if (typeof onProgress === 'function') {
@@ -309,7 +322,7 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
           shipMethod,
           shipDate,
           shippedQty: info.hasQty ? String(info.qtySum) : '',
-        }));
+        }), lineItem);
       });
     });
 
@@ -328,7 +341,7 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
         shipMethod: '',
         shipDate: '',
         shippedQty: '',
-      }));
+      }), lineItem);
     });
 
     rowsBuiltFromOrders += 1;
@@ -345,6 +358,7 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
 
   return {
     rows,
+    rowDetails,
     debugInfo: currentDebugInfo,
   };
 }

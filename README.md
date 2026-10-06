@@ -57,6 +57,7 @@ The legacy single-store variables remain supported. Keep credentials in `.env`; 
 ## CSV behavior
 
 - The standard report column names are defined in `config/report.js`; the misspelling **"Shipping Landded Cost"** is intentional.
+- "Split Product Personalization and Product Options" turns each key into its own column (e.g. `Product Personalization: Establishment Name`, `... Establishment Name Price`, `Product Option: Award Level`). Rows with the same keys share columns; unique keys add columns. Not used with Danielle's Format.
 - Danielle's Format is a separate client-side column mapping.
 - CSV values are escaped and prefixed when they could be interpreted as spreadsheet formulas.
 - BrightSites API access uses v2.6.1; requests are paginated and rate-limited per token.

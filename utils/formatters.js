@@ -73,7 +73,78 @@ function formatProductPersonalization(pp) {
   }).filter(Boolean).join(' ; ');
 }
 
+function addPair(pairs, header, value) {
+  if (value == null || value === '') return;
+  const found = pairs.find((p) => p[0] === header);
+  if (found) found[1] += '; ' + String(value);
+  else pairs.push([header, String(value)]);
+}
+
+function extractOptionPairs(opts) {
+  const pairs = [];
+  if (!opts) return pairs;
+  const prefix = 'Product Option: ';
+  if (typeof opts === 'string') {
+    opts.split(';').map((t) => t.trim()).filter(Boolean).forEach((part) => {
+      const i = part.indexOf(':');
+      if (i > 0) addPair(pairs, prefix + part.slice(0, i).trim(), part.slice(i + 1).trim());
+      else addPair(pairs, prefix + part, part);
+    });
+    return pairs;
+  }
+  if (Array.isArray(opts)) {
+    opts.forEach((o) => {
+      if (o == null) return;
+      if (typeof o === 'string') {
+        extractOptionPairs(o).forEach(([k, v]) => addPair(pairs, k, v));
+        return;
+      }
+      const name = o.option_name || o.name || '';
+      const sub = o.sub_option_name || o.value || o.sub || '';
+      if (name) addPair(pairs, prefix + name, sub);
+    });
+    return pairs;
+  }
+  if (typeof opts === 'object') {
+    Object.entries(opts).forEach(([k, v]) => addPair(pairs, prefix + k, v));
+  }
+  return pairs;
+}
+
+function extractPersonalizationPairs(pp) {
+  const pairs = [];
+  if (!pp) return pairs;
+  const prefix = 'Product Personalization: ';
+  if (typeof pp === 'string') {
+    addPair(pairs, 'Product Personalization', pp);
+    return pairs;
+  }
+  const arr = Array.isArray(pp) ? pp : (pp.personalizations || pp.product_personalizations || []);
+  if (!Array.isArray(arr)) return pairs;
+  arr.forEach((item) => {
+    if (!item) return;
+    const title = item.title || item.name || '';
+    if (Array.isArray(item.attributes)) {
+      item.attributes.forEach((a) => {
+        if (typeof a === 'string') { addPair(pairs, prefix + (title || a), a); return; }
+        const k = a.key || a.name || '';
+        const v = a.value || a.val || '';
+        const header = !k || k === title ? (title || k) : (title ? `${title}: ${k}` : k);
+        if (header) addPair(pairs, prefix + header, v);
+      });
+    }
+    if (item.price_modifier && title) {
+      const pt = item.price_modifier.modifier_type || item.price_modifier.type || '';
+      const amt = item.price_modifier.amount || item.price_modifier.value || '';
+      if (pt || amt) addPair(pairs, `${prefix}${title} Price`, `${pt}${amt}`);
+    }
+  });
+  return pairs;
+}
+
 module.exports = {
+  extractOptionPairs,
+  extractPersonalizationPairs,
   formatDateMDY,
   formatProductOptions,
   formatProductPersonalization,

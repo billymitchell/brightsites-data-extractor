@@ -81,3 +81,13 @@ test('fills tax, shipping and extra columns from real BrightSites field names', 
   assert.equal(col('Logo Charges'), '10.00');
   assert.equal(col('In-Hands Date'), '2018-06-15');
 });
+
+test('key/value extraction for personalization and options', () => {
+  const { extractPersonalizationPairs, extractOptionPairs } = require('../utils/formatters');
+  assert.deepStrictEqual(extractPersonalizationPairs([{
+    title: 'Establishment Name',
+    attributes: [{ key: 'Establishment Name', value: 'Pan Pacific London' }],
+    price_modifier: { modifier_type: '$', amount: '0.0' },
+  }]), [['Product Personalization: Establishment Name', 'Pan Pacific London'], ['Product Personalization: Establishment Name Price', '$0.0']]);
+  assert.deepStrictEqual(extractOptionPairs([{ option_name: 'Award Level', sub_option_name: '5 Star' }]), [['Product Option: Award Level', '5 Star']]);
+});

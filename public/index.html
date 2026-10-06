@@ -86,6 +86,10 @@
                 <input type="checkbox" id="includeUps" role="switch" />
                 Add UPS tracking data (status, service, weight, delivery date)
             </label>
+            <label>
+                <input type="checkbox" id="splitPairs" role="switch" />
+                Split Product Personalization and Product Options into one column per key (value in the cell)
+            </label>
             <details id="columnPicker" open>
                 <summary>Choose report columns <small id="columnCount"></small></summary>
                 <div class="actions">
@@ -525,9 +529,35 @@
             if (!useDanielle) {
                 const keep = [];
                 result.columns.forEach((name, idx) => { if (!deselectedColumns.has(name)) keep.push(idx); });
+                const split = document.getElementById('splitPairs').checked && Array.isArray(result.rowDetails);
+                const ppIdx = result.columns.indexOf('Product Personalization');
+                const optIdx = result.columns.indexOf('Product Options');
+                const dropIdx = new Set();
+                if (split) {
+                    if (ppIdx >= 0) dropIdx.add(ppIdx);
+                    if (optIdx >= 0) dropIdx.add(optIdx);
+                }
+                const baseKeep = keep.filter(i => !dropIdx.has(i));
+                const dynHeaders = [];
+                const seen = new Set();
+                const dynRows = result.rows.map((r, n) => {
+                    const map = {};
+                    if (split) {
+                        const d = result.rowDetails[n] || {};
+                        const pairs = (ppIdx >= 0 && !deselectedColumns.has('Product Personalization') ? (d.personalization || []) : [])
+                            .concat(optIdx >= 0 && !deselectedColumns.has('Product Options') ? (d.options || []) : []);
+                        pairs.forEach(([k, v]) => {
+                            map[k] = v;
+                            if (!seen.has(k)) { seen.add(k); dynHeaders.push(k); }
+                        });
+                    }
+                    return map;
+                });
+                // Personalization columns first, then options, each in first-seen order
+                dynHeaders.sort((a, b) => (a.startsWith('Product Option') ? 1 : 0) - (b.startsWith('Product Option') ? 1 : 0));
                 return {
-                    columns: keep.map(i => result.columns[i]),
-                    rows: result.rows.map(r => keep.map(i => r[i]))
+                    columns: baseKeep.map(i => result.columns[i]).concat(dynHeaders),
+                    rows: result.rows.map((r, n) => baseKeep.map(i => r[i]).concat(dynHeaders.map(h => dynRows[n][h] || '')))
                 };
             }
 
@@ -619,8 +649,10 @@
         }
         loadStores();
 
-        document.getElementById('danielleFormat').addEventListener('change', () => {
-            if (fullResult) renderPreview(fullResult);
+        ['danielleFormat', 'splitPairs'].forEach(id => {
+            document.getElementById(id).addEventListener('change', () => {
+                if (fullResult) renderPreview(fullResult);
+            });
         });
 
         setJobControlState();
