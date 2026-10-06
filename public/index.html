@@ -555,10 +555,8 @@
                 });
                 // Personalization columns first, then options, each in first-seen order
                 dynHeaders.sort((a, b) => (a.startsWith('Product Option') ? 1 : 0) - (b.startsWith('Product Option') ? 1 : 0));
-                const notFromApi = new Set(['Billing Month', 'Expected Delivery Date']);
-                const label = c => (c.startsWith('UPS ') || notFromApi.has(c)) ? c : 'OMG ' + c;
                 return {
-                    columns: baseKeep.map(i => result.columns[i]).concat(dynHeaders).map(label),
+                    columns: baseKeep.map(i => result.columns[i]).concat(dynHeaders),
                     rows: result.rows.map((r, n) => baseKeep.map(i => r[i]).concat(dynHeaders.map(h => dynRows[n][h] || '')))
                 };
             }
