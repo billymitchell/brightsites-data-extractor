@@ -47,3 +47,9 @@ test('keeps separately named options and comma-containing values intact', () => 
     ['Product Option: Color', 'Red, White, Blue'],
   ]);
 });
+
+test('date-only API dates keep their calendar date across time zones', () => {
+  const { formatDateMDY } = require('../utils/formatters');
+  assert.equal(formatDateMDY('2026-02-01'), '02/01/2026');
+  assert.equal(formatDateMDY('2026-02-30'), '');
+});

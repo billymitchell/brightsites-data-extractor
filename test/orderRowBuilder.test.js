@@ -1,0 +1,48 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { getReportColumnConfig } = require('../config/report');
+const { buildOrderReportEntry } = require('../services/orderRowBuilder');
+const fixture = require('./helpers/reportFixture');
+const columns = getReportColumnConfig('order').columns;
+function fields(entry) { return Object.fromEntries(columns.map((c, i) => [c, entry.row[i]])); }
+test('summarizes original items and distinct shipments without multiplying totals', () => {
+  const entry = buildOrderReportEntry({ ...fixture, line_items: [...fixture.line_items, fixture.line_items[0]], shipments: [...fixture.shipments, fixture.shipments[0]] });
+  const f = fields(entry);
+  assert.equal(entry.row.length, columns.length);
+  assert.equal(f['Order #'], '00100');
+  assert.equal(f['Order Total'], '125.00');
+  assert.equal(f['Unique Item Count'], 2);
+  assert.equal(f['Original Quantity'], 5);
+  assert.equal(f['Shipped Quantity'], 5);
+  assert.equal(f['Shipment Count'], 2);
+  assert.equal(f['Tracking #'], '0000123; 0000456');
+  assert.equal(f['First Ship Date'], '02/01/2026');
+  assert.equal(f['Last Ship Date'], '02/02/2026');
+  assert.deepEqual(entry.rowDetails.options, [['Product Option: Finish', '7: Matte; 8: Glossy'], ['Product Option: New Key', '8: Late Value']]);
+});
+test('empty collections produce one order entry with zero counts', () => {
+  const f = fields(buildOrderReportEntry({ order: fixture.order }));
+  for (const key of ['Unique Item Count', 'Original Quantity', 'Shipped Quantity', 'Shipment Count']) assert.equal(f[key], 0);
+});
+test('unknown quantities remain blank while real zero stays zero', () => {
+  for (const qty of [undefined, '', 'bad', Infinity, -1]) {
+    const f = fields(buildOrderReportEntry({ order: fixture.order, line_items: [{ id: 7, quantity: qty }], shipments: [{ line_items: [{ id: 7, quantity: qty }] }] }));
+    assert.equal(f['Original Quantity'], '');
+    assert.equal(f['Shipped Quantity'], '');
+  }
+  const f = fields(buildOrderReportEntry({ order: fixture.order, line_items: [{ id: 7, quantity: 0 }], shipments: [{ line_items: [{ id: 7, quantity: 0 }] }] }));
+  assert.equal(f['Original Quantity'], 0);
+  assert.equal(f['Shipped Quantity'], 0);
+});
+test('shipments without IDs remain distinct even when their tracking matches', () => {
+  const shipments = [{ tracking_number: 'x', line_items: [{ id: 7, quantity: 1 }] }, { tracking_number: 'x', line_items: [{ id: 7, quantity: 2 }] }];
+  const f = fields(buildOrderReportEntry({ ...fixture, shipments }));
+  assert.equal(f['Shipment Count'], 2);
+  assert.equal(f['Shipped Quantity'], 3);
+  assert.equal(f['Tracking #'], 'x');
+});
+
+test('a missing allocation cannot be hidden by a known quantity for the same item', () => {
+  const f = fields(buildOrderReportEntry({ ...fixture, shipments: [{ id: 'a', line_items: [{ id: 7, quantity: 1 }, { id: 7 }] }] }));
+  assert.equal(f['Shipped Quantity'], '');
+});
