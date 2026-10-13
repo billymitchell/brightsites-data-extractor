@@ -7,6 +7,31 @@ process.env.BRIGHTSITES_STORES = JSON.stringify({
 
 const { validateRunRequest } = require('../services/orderService');
 
+test('multi-status order reports preserve canonical IDs and reject missing IDs', async () => {
+  const sites = require('../lib/brightSites');
+  const originalFetch = sites.fetchAllPages;
+  const servicePath = require.resolve('../services/orderService');
+  try {
+    let missingId = false;
+    sites.fetchAllPages = async (path, params) => params.status === 'one'
+      ? [{ id: 'api-1', order_id: '100' }, ...(missingId ? [{}] : [])]
+      : [{ id: 'api-2', order_id: '100' }, { id: 'api-1', order_id: '100' }];
+    delete require.cache[servicePath];
+    const { getRunContext } = require(servicePath);
+    for (const reportLevel of ['order', 'both']) {
+      const body = { storeKey: 'test', start: '2026-02-01', end: '2026-02-02', reportLevel, status: ['one', 'two'] };
+      const context = await getRunContext(body);
+      assert.deepEqual(context.orders.map(order => order.id), ['api-1', 'api-2']);
+      missingId = true;
+      await assert.rejects(getRunContext(body), /missing.*identifier|no.*identifier/i);
+      missingId = false;
+    }
+  } finally {
+    sites.fetchAllPages = originalFetch;
+    delete require.cache[servicePath];
+  }
+});
+
 test('rejects reversed report date ranges', () => {
   assert.throws(
     () => validateRunRequest({ storeKey: 'test', start: '2026-02-02', end: '2026-02-01' }),

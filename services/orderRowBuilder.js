@@ -38,7 +38,8 @@ function buildOrderReportEntry({ order, line_items = [], shipments = [] }) {
   const details = summarizeDetails(items);
   const amounts = extractOrderAmounts(order);
   const payment = order.payment || (Array.isArray(order.payments) ? order.payments[0] : null) || {};
-  const dates = uniqueShipments.map(s => s.ship_date || s.shipped_at).filter(v => v && Number.isFinite(Date.parse(v))).sort((a, b) => Date.parse(a) - Date.parse(b));
+  const dates = uniqueShipments.map(s => s.ship_date || s.shipped_at).filter(v => formatDateMDY(v) && Number.isFinite(Date.parse(v))).sort((a, b) => Date.parse(a) - Date.parse(b));
+  const shipmentCost = pickFirstValue(order.shipment, 'cost');
   const shipped = uniqueShipments.flatMap(s => [...aggregateShipmentLineItems(s).values()].map(v => v.hasQty ? v.qtySum : undefined));
   for (const shipment of uniqueShipments) {
     for (const allocation of shipment.line_items || []) {
@@ -56,7 +57,7 @@ function buildOrderReportEntry({ order, line_items = [], shipments = [] }) {
     'Order Item Total': pickFirstValue(order, 'item_total'),
     'Order Sales Tax': amounts.salesTax ?? '', 'Order Shipping Sales Tax': amounts.shippingTax ?? '',
     'Order Discounts': amounts.discounts ?? '',
-    'Store Shipping Cost': pickFirstValue(order.shipment, 'cost') || amounts.shipping || pickFirstValue(order, 'shipping_total', 'shipping_cost', 'shipping_amount', 'shipping_price'),
+    'Store Shipping Cost': shipmentCost !== '' ? shipmentCost : amounts.shipping ?? pickFirstValue(order, 'shipping_total', 'shipping_cost', 'shipping_amount', 'shipping_price'),
     'Customer Email': pickFirstValue(order, 'customer_email'), Username: pickFirstValue(order, 'username'),
     'Customer ID': pickFirstValue(order, 'customer_id'),
     'Payment Method': pickFirstValue(payment.details, 'method'), 'Payment Status': pickFirstValue(payment, 'state'),

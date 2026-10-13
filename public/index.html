@@ -37,7 +37,7 @@
 <body>
     <main class="container">
         <header class="app-header">
-            <h1>BrightSites CSV Export</h1>
+            <h1>BrightSites Report Export</h1>
             <div class="actions"><a href="/api/diagnostics/report" role="button" class="outline secondary" download>Download support info</a><form method="post" action="/logout"><button type="submit" class="outline secondary">Sign out</button></form></div>
         </header>
 
@@ -104,7 +104,7 @@
                     <button type="button" class="secondary outline" id="colsCore">Core columns</button>
                     <button type="button" class="secondary outline" id="colsNone">Clear</button>
                 </div>
-                <small>Applies to the preview and CSV download. Not used with Danielle's Format.</small>
+                <small>Applies to the active table's preview and download. Not used with Danielle's Format.</small>
                 <div id="columnGroups"></div>
             </details>
             <div class="actions">
@@ -467,7 +467,7 @@
             const tbody = document.createElement('tbody');
             const rows = view.rows.slice(0, PREVIEW_ROW_LIMIT);
             if (view.rows.length > PREVIEW_ROW_LIMIT) {
-                previewMeta.textContent = `Preview is truncated. Showing ${rows.length} of ${view.rows.length} rows. Download CSV to get the full result.`;
+                previewMeta.textContent = `Preview is truncated. Showing ${rows.length} of ${view.rows.length} rows. Download the report to get the full result.`;
             } else {
                 previewMeta.textContent = `Preview is showing all ${view.rows.length} rows returned by the server.`;
             }
@@ -494,6 +494,7 @@
         let deselectedColumns = hiddenByLevel.shipment;
         let columnCatalog = { groups: [], core: [] };
         let catalogRequestId = 0;
+        let catalogLoading = false;
 
         async function activateTable(level) {
             activeTableLevel = level;
@@ -539,6 +540,7 @@
         }
 
         function setSelection(selectedNames) {
+            if (catalogLoading) return;
             const all = columnCatalog.groups.flatMap(g => g.columns);
             deselectedColumns = new Set(all.filter(c => !selectedNames.includes(c)));
             hiddenByLevel[activeTableLevel] = deselectedColumns;
@@ -549,6 +551,9 @@
         async function loadColumnPicker() {
             const level = activeTableLevel;
             const requestId = ++catalogRequestId;
+            catalogLoading = true;
+            document.getElementById('columnGroups').innerHTML = '';
+            for (const id of ['colsAll', 'colsNone', 'colsCore']) document.getElementById(id).disabled = true;
             try {
                 const res = await fetch(`/api/columns?reportLevel=${level}`);
                 if (!res.ok) return;
@@ -569,6 +574,7 @@
                     cb.type = 'checkbox';
                     cb.dataset.col = col;
                     cb.addEventListener('change', () => {
+                        if (catalogLoading || level !== activeTableLevel || requestId !== catalogRequestId) return;
                         if (cb.checked) deselectedColumns.delete(col); else deselectedColumns.add(col);
                         saveColumnSelection();
                     });
@@ -578,6 +584,8 @@
                 });
                 host.appendChild(fs);
             });
+            catalogLoading = false;
+            for (const id of ['colsAll', 'colsNone', 'colsCore']) document.getElementById(id).disabled = false;
             syncColumnCheckboxes();
             saveColumnSelection();
         }

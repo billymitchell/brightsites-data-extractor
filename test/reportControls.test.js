@@ -65,3 +65,18 @@ test('preview tab switching reuses completed tables and retains independent pref
   await document.getElementById('previewShipments').events.click();
   assert.equal(vm.runInContext("deselectedColumns.has('Order #')", context), true);
 });
+
+test('column actions cannot overwrite another table while its catalog is loading', async () => {
+  const { document, context } = harness();
+  await vm.runInContext('loadColumnPicker()', context);
+  vm.runInContext("hiddenByLevel.order.add('Order Only');", context);
+  let release;
+  context.fetch = async () => new Promise(resolve => { release = resolve; });
+  const switching = vm.runInContext("activateTable('order')", context);
+  assert.equal(document.getElementById('colsNone').disabled, true);
+  document.getElementById('colsNone').events.click();
+  assert.deepEqual(Array.from(vm.runInContext('[...hiddenByLevel.order]', context)), ['Order Only']);
+  release({ ok: true, json: async () => ({ core: ['Order Only'], groups: [{ label: 'Order', columns: ['Order Only'] }] }) });
+  await switching;
+  assert.equal(document.getElementById('colsNone').disabled, false);
+});

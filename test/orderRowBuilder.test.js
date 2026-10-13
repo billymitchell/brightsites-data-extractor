@@ -46,3 +46,14 @@ test('a missing allocation cannot be hidden by a known quantity for the same ite
   const f = fields(buildOrderReportEntry({ ...fixture, shipments: [{ id: 'a', line_items: [{ id: 7, quantity: 1 }, { id: 7 }] }] }));
   assert.equal(f['Shipped Quantity'], '');
 });
+
+test('zero source shipping cost takes priority over nonzero fallback amounts', () => {
+  const f = fields(buildOrderReportEntry({ order: { id: 1, shipment: { cost: 0 }, shipping_total: 25 } }));
+  assert.equal(f['Store Shipping Cost'], 0);
+});
+
+test('invalid calendar shipment dates do not suppress valid date extrema', () => {
+  const f = fields(buildOrderReportEntry({ order: { id: 1 }, shipments: [{ ship_date: '2026-03-01' }, { ship_date: '2026-02-30' }] }));
+  assert.equal(f['First Ship Date'], '03/01/2026');
+  assert.equal(f['Last Ship Date'], '03/01/2026');
+});

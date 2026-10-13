@@ -23,6 +23,8 @@ test('Excel export produces two linked native tables and typed literal cells', a
   assert.equal(shipment.getCell('E2').value, '=literal');
   assert.equal(shipment.getCell('E3').value, '+literal');
   assert.equal(order.getCell('F2').value.result, 3);
+  assert.match(order.getCell('F2').value.formula, /OrdersTable\[\[#This Row\],\[Order Key\]\]/);
+  assert.match(shipment.getCell('G2').value.formula, /ShipmentsTable\[\[#This Row\],\[Order Key\]\]/);
   assert.match(order.getCell('E2').value.formula, /MATCH\(.*ShipmentsTable\[Order Key\]/);
   assert.equal(order.getCell('E3').value, 'No shipment items');
   assert.match(shipment.getCell('G2').value.formula, /MATCH\(.*OrdersTable\[Order Key\]/);
@@ -60,3 +62,35 @@ test('one workbook builds at a time and the lock releases after completion', asy
   assert.ok((await exportReportWorkbook({ tables: tables() })).length > 0);
 });
 module.exports = { tables };
+
+test('Excel quantity formats do not add decimal punctuation to whole counts', async () => {
+  const workbook = await read(await exportReportWorkbook({ tables: tables() }));
+  assert.equal(workbook.getWorksheet('Shipment Level').getCell('D2').numFmt, '0');
+});
+test('oversized workbooks reject with guidance before allocation', async () => {
+  const input = tables();
+  input.shipment.rows = Array.from({ length: 10001 }, () => ['00100']);
+  input.shipment.rowKeys = input.shipment.rows.map(() => 'shop:100');
+  await assert.rejects(exportReportWorkbook({ tables: input }), /Excel.*limit|Excel.*maximum/i);
+});
+
+test('wide workbooks enforce a cell budget as well as a row budget', async () => {
+  const input = tables();
+  input.shipment.columns = Array.from({ length: 50 }, (_, i) => `Field ${i}`);
+  input.shipment.rows = Array.from({ length: 2000 }, () => input.shipment.columns.map(() => 'Sample'));
+  input.shipment.rowKeys = input.shipment.rows.map(() => 'shop:100');
+  await assert.rejects(exportReportWorkbook({ tables: input }), /cell limit/i);
+});
+
+test('dynamic cell budget rejects before materializing the rows-by-keys matrix', async () => {
+  const input = tables();
+  input.shipment.columns = ['Order #', 'Product Options'];
+  input.shipment.rows = Array.from({ length: 1000 }, () => {
+    const row = ['00100', ''];
+    Object.defineProperty(row, 0, { get() { throw new Error('Detail matrix allocated before budget check'); } });
+    return row;
+  });
+  input.shipment.rowKeys = input.shipment.rows.map(() => 'shop:100');
+  input.shipment.rowDetails = input.shipment.rows.map((row, index) => ({ options: [[`Product Option: Key ${index}`, 'value']] }));
+  await assert.rejects(exportReportWorkbook({ tables: input, selections: { shipment: { splitPairs: true } } }), /cell limit/i);
+});

@@ -56,6 +56,9 @@ async function fetchOrders(params, statuses, storeOpts, options = {}) {
         );
       })
     );
+    if (options.reportLevel === 'order' || options.reportLevel === 'both') {
+      return deduplicateOrders(lists.flat());
+    }
     const dedup = new Map();
     const keyOf = (order) => String(order && (order.order_id || order.id || order.orderNumber || order.number || ''));
     lists.flat().forEach((order) => {
@@ -230,7 +233,7 @@ async function getRunContext(body = {}, options = {}) {
   }
 
   throwIfCanceled(isCanceled, 'Report job canceled before fetching orders.');
-  const fetched = await fetchOrders(params, statuses, storeOpts, options);
+  const fetched = await fetchOrders(params, statuses, storeOpts, { ...options, reportLevel });
   const orders = reportLevel === 'shipment' ? fetched : deduplicateOrders(fetched);
   throwIfCanceled(isCanceled, 'Report job canceled after fetching orders.');
 
