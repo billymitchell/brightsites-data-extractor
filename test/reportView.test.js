@@ -15,6 +15,7 @@ function buildView(result, split, deselected = []) {
   const context = vm.createContext({
     document: { getElementById: (id) => ({ checked: id === 'splitPairs' && split }) },
     deselectedColumns: new Set(deselected),
+    BrightSitesReportView: require('../public/reportView'),
   });
   vm.runInContext(html.slice(start, end), context);
   return JSON.parse(JSON.stringify(context.buildViewData(result)));
@@ -62,5 +63,5 @@ test('keeps the original Version value when splitting is off', () => {
 
 test('hiding Product Options also hides the split Version columns', () => {
   const view = buildView(redemptionResult(), true, ['Product Options']);
-  assert.deepEqual(view, { columns: ['Order #'], rows: [['2505'], ['2505']] });
+  assert.deepEqual(view, { rowKeys: [], columns: ['Order #'], rows: [['2505'], ['2505']] });
 });

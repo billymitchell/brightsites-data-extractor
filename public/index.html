@@ -46,6 +46,13 @@
                 <label>Store
                     <select id="storeSelect"><option>Loading...</option></select>
                 </label>
+                <label>Table type
+                    <select id="reportLevel">
+                        <option value="shipment">Shipment Level</option>
+                        <option value="order">Order Level</option>
+                        <option value="both">Both tables (Excel)</option>
+                    </select>
+                </label>
                 <label>Date Preset
                     <select id="datePreset">
                         <option value="custom">Custom</option>
@@ -80,11 +87,11 @@
                 </fieldset>
             <label>
                 <input type="checkbox" id="danielleFormat" role="switch" />
-                Danielle's Format
+                Danielle's Format <small id="danielleHelp" hidden>Available in Shipment Level.</small>
             </label>
             <label>
                 <input type="checkbox" id="includeUps" role="switch" />
-                Add UPS tracking data (status, service, weight, delivery date)
+                Add UPS tracking data (status, service, weight, delivery date) <small id="upsHelp" hidden>Available in Shipment Level or Both tables.</small>
             </label>
             <label>
                 <input type="checkbox" id="splitPairs" role="switch" />
@@ -107,6 +114,7 @@
         </article>
 
         <div id="meta"></div>
+        <div id="previewTabs" class="actions" hidden><button type="button" id="previewOrders" aria-pressed="true">Order Level</button><button type="button" id="previewShipments" class="outline" aria-pressed="false">Shipment Level</button></div>
         <div id="previewMeta"></div>
         <div id="preview"></div>
     </main>
@@ -124,6 +132,7 @@
     </div>
 
     <script src="/csv.js"></script>
+    <script src="/reportView.js"></script>
     <script>
         const _origFetch = window.fetch.bind(window);
         window.fetch = async (...args) => {
@@ -141,6 +150,9 @@
         // Column configuration and usage sections removed; preview uses all server-provided columns.
 
         let fullResult = null;
+        let completedJobId = null;
+        let workbookDownloading = false;
+        let activeTableLevel = 'shipment';
         let activeJobId = null;
         let activeJobPollTimer = null;
         let cancelRequested = false;
@@ -201,13 +213,16 @@
         }
 
         function setJobControlState() {
-            runButton.disabled = Boolean(activeJobId);
+            runButton.disabled = Boolean(activeJobId) || workbookDownloading;
+            document.getElementById('reportLevel').disabled = Boolean(activeJobId) || workbookDownloading;
             cancelJobButton.disabled = !activeJobId || cancelRequested;
             cancelJobButton.textContent = cancelRequested ? 'Canceling...' : 'Cancel';
         }
 
         function resetResultState() {
             fullResult = null;
+            completedJobId = null;
+            document.getElementById('previewTabs').hidden = true;
             downloadButton.disabled = true;
             previewEl.innerHTML = '';
             previewMetaEl.textContent = '';
@@ -296,9 +311,12 @@
 
             const result = await res.json();
             fullResult = result;
+            completedJobId = job.id;
+            document.getElementById('previewTabs').hidden = !result.tables;
+            if (result.tables) await activateTable(activeTableLevel);
             renderPreview(result);
             downloadButton.disabled = false;
-            metaEl.textContent = `Orders: ${result.meta.orders}  Rows: ${result.meta.rows}`;
+            metaEl.textContent = result.tables ? `Orders: ${result.meta.orders}  Order rows: ${result.meta.rowCounts.order}  Shipment rows: ${result.meta.rowCounts.shipment}` : `Table: ${result.meta.reportLevel === 'order' ? 'Order Level' : 'Shipment Level'}  Orders: ${result.meta.orders}  Rows: ${result.meta.rows}`;
             setJobOverlayVisible(false);
             completeActiveJob();
         }
@@ -409,6 +427,7 @@
 
             const payload = {
                 storeKey: storeKey,
+                reportLevel: document.getElementById('reportLevel').value,
                 start: start,
                 end: end
             };
@@ -465,15 +484,53 @@
             preview.appendChild(table);
         }
 
-        const COLUMN_STORAGE_KEY = 'brightsites_deselected_columns_v2';
-        let deselectedColumns = new Set();
-        try { deselectedColumns = new Set(JSON.parse(localStorage.getItem(COLUMN_STORAGE_KEY) || '[]')); } catch (e) { /* ignore */ }
+        const columnStorageKeys = { shipment: 'brightsites_deselected_columns_v2', order: 'brightsites_deselected_columns_order_v1' };
+        const hiddenByLevel = { shipment: new Set(), order: new Set() };
+        const splitByLevel = { shipment: false, order: false };
+        for (const level of ['order', 'shipment']) {
+            try { hiddenByLevel[level] = new Set(JSON.parse(localStorage.getItem(columnStorageKeys[level]) || '[]')); } catch (e) { /* use defaults */ }
+        }
+        try { Object.assign(splitByLevel, JSON.parse(localStorage.getItem('brightsites_split_pairs_v1') || '{}')); } catch (e) { /* use defaults */ }
+        let deselectedColumns = hiddenByLevel.shipment;
         let columnCatalog = { groups: [], core: [] };
+        let catalogRequestId = 0;
+
+        async function activateTable(level) {
+            activeTableLevel = level;
+            deselectedColumns = hiddenByLevel[level];
+            document.getElementById('splitPairs').checked = Boolean(splitByLevel[level]);
+            document.getElementById('previewOrders').setAttribute('aria-pressed', String(level === 'order'));
+            document.getElementById('previewShipments').setAttribute('aria-pressed', String(level === 'shipment'));
+            document.getElementById('previewOrders').className = level === 'order' ? '' : 'outline';
+            document.getElementById('previewShipments').className = level === 'shipment' ? '' : 'outline';
+            if (fullResult) renderPreview(fullResult);
+            await loadColumnPicker();
+        }
+        async function changeReportLevel() {
+            const mode = document.getElementById('reportLevel').value;
+            resetResultState();
+            try { localStorage.setItem('brightsites_report_level_v1', mode); } catch (e) { /* ignore */ }
+            const danielle = document.getElementById('danielleFormat');
+            danielle.disabled = mode !== 'shipment';
+            if (danielle.disabled) danielle.checked = false;
+            document.getElementById('danielleHelp').hidden = !danielle.disabled;
+            const ups = document.getElementById('includeUps');
+            ups.disabled = mode === 'order';
+            if (ups.disabled) ups.checked = false;
+            document.getElementById('upsHelp').hidden = !ups.disabled;
+            downloadButton.textContent = mode === 'both' ? 'Download Excel' : 'Download CSV';
+            metaEl.textContent = 'Choose your columns, then run a report.';
+            await activateTable(mode === 'shipment' ? 'shipment' : 'order');
+        }
+        document.getElementById('reportLevel').addEventListener('change', changeReportLevel);
+        document.getElementById('previewOrders').addEventListener('click', () => activateTable('order'));
+        document.getElementById('previewShipments').addEventListener('click', () => activateTable('shipment'));
 
         function saveColumnSelection() {
-            try { localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify([...deselectedColumns])); } catch (e) { /* ignore */ }
-            const total = columnCatalog.groups.reduce((n, g) => n + g.columns.length, 0);
-            document.getElementById('columnCount').textContent = total ? `(${total - deselectedColumns.size} of ${total} selected)` : '';
+            try { localStorage.setItem(columnStorageKeys[activeTableLevel], JSON.stringify([...deselectedColumns])); } catch (e) { /* ignore */ }
+            const all = columnCatalog.groups.flatMap(g => g.columns);
+            const total = all.length;
+            document.getElementById('columnCount').textContent = total ? `(${all.filter(c => !deselectedColumns.has(c)).length} of ${total} selected)` : '';
             if (fullResult) renderPreview(fullResult);
         }
 
@@ -484,15 +541,20 @@
         function setSelection(selectedNames) {
             const all = columnCatalog.groups.flatMap(g => g.columns);
             deselectedColumns = new Set(all.filter(c => !selectedNames.includes(c)));
+            hiddenByLevel[activeTableLevel] = deselectedColumns;
             syncColumnCheckboxes();
             saveColumnSelection();
         }
 
         async function loadColumnPicker() {
+            const level = activeTableLevel;
+            const requestId = ++catalogRequestId;
             try {
-                const res = await fetch('/api/columns');
+                const res = await fetch(`/api/columns?reportLevel=${level}`);
                 if (!res.ok) return;
-                columnCatalog = await res.json();
+                const catalog = await res.json();
+                if (level !== activeTableLevel || requestId !== catalogRequestId) return;
+                columnCatalog = catalog;
             } catch (err) { console.error('loadColumnPicker', err); return; }
             const host = document.getElementById('columnGroups');
             host.innerHTML = '';
@@ -522,44 +584,13 @@
         document.getElementById('colsAll').addEventListener('click', () => setSelection(columnCatalog.groups.flatMap(g => g.columns)));
         document.getElementById('colsNone').addEventListener('click', () => setSelection([]));
         document.getElementById('colsCore').addEventListener('click', () => setSelection(columnCatalog.core));
-        loadColumnPicker();
 
         function buildViewData(result) {
+            result = result.tables ? result.tables[activeTableLevel] : result;
             const useDanielle = document.getElementById('danielleFormat').checked;
-            if (!useDanielle) {
-                const keep = [];
-                result.columns.forEach((name, idx) => { if (!deselectedColumns.has(name)) keep.push(idx); });
-                const split = document.getElementById('splitPairs').checked && Array.isArray(result.rowDetails);
-                const ppIdx = result.columns.indexOf('Product Personalization');
-                const optIdx = result.columns.indexOf('Product Options');
-                const dropIdx = new Set();
-                if (split) {
-                    if (ppIdx >= 0) dropIdx.add(ppIdx);
-                    if (optIdx >= 0) dropIdx.add(optIdx);
-                }
-                const baseKeep = keep.filter(i => !dropIdx.has(i));
-                const dynHeaders = [];
-                const seen = new Set();
-                const dynRows = result.rows.map((r, n) => {
-                    const map = {};
-                    if (split) {
-                        const d = result.rowDetails[n] || {};
-                        const pairs = (ppIdx >= 0 && !deselectedColumns.has('Product Personalization') ? (d.personalization || []) : [])
-                            .concat(optIdx >= 0 && !deselectedColumns.has('Product Options') ? (d.options || []) : []);
-                        pairs.forEach(([k, v]) => {
-                            map[k] = v;
-                            if (!seen.has(k)) { seen.add(k); dynHeaders.push(k); }
-                        });
-                    }
-                    return map;
-                });
-                // Personalization columns first, then options, each in first-seen order
-                dynHeaders.sort((a, b) => (a.startsWith('Product Option') ? 1 : 0) - (b.startsWith('Product Option') ? 1 : 0));
-                return {
-                    columns: baseKeep.map(i => result.columns[i]).concat(dynHeaders),
-                    rows: result.rows.map((r, n) => baseKeep.map(i => r[i]).concat(dynHeaders.map(h => dynRows[n][h] || '')))
-                };
-            }
+            if (!useDanielle) return BrightSitesReportView.buildTableView(result, {
+                deselectedColumns: [...deselectedColumns], splitPairs: document.getElementById('splitPairs').checked
+            });
 
             const sourceIndexByName = {};
             result.columns.forEach((name, idx) => { sourceIndexByName[name] = idx; });
@@ -577,23 +608,41 @@
             return { columns: targetColumns, rows: mappedRows };
         }
 
-        downloadButton.addEventListener('click', () => {
-            if (!fullResult) return;
-            const view = buildViewData(fullResult);
-            const rows = view.rows;
-            const visible = view.columns;
-            const lines = [];
-            lines.push(visible.map(BrightSitesCsv.escapeCsvCell).join(','));
-            rows.forEach(r => {
-                const out = visible.map((colName, idx) => idx >= 0 ? BrightSitesCsv.escapeCsvCell(r[idx]) : '');
-                lines.push(out.join(','));
-            });
-            const csv = lines.join('\n');
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        downloadButton.addEventListener('click', async () => {
+            if (!fullResult || workbookDownloading) return;
+            let blob, filename;
+            if (fullResult.tables) {
+                workbookDownloading = true;
+                downloadButton.disabled = true;
+                setJobControlState();
+                try {
+                    const selections = {};
+                    for (const level of ['order', 'shipment']) selections[level] = {
+                        columns: fullResult.tables[level].columns.filter(c => !hiddenByLevel[level].has(c)),
+                        splitPairs: Boolean(splitByLevel[level])
+                    };
+                    const res = await fetch(`/api/run/${completedJobId}/workbook`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selections }) });
+                    if (!res.ok) throw new Error(await readErrorResponse(res));
+                    blob = await res.blob();
+                    filename = 'brightsites_orders_and_shipments.xlsx';
+                } catch (err) {
+                    metaEl.textContent = 'Excel download failed: ' + err.message;
+                    return;
+                } finally {
+                    workbookDownloading = false;
+                    downloadButton.disabled = false;
+                    setJobControlState();
+                }
+            } else {
+                const view = buildViewData(fullResult);
+                const csv = [view.columns, ...view.rows].map(r => r.map(BrightSitesCsv.escapeCsvCell).join(',')).join('\n');
+                blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                filename = fullResult.meta.reportLevel === 'order' ? 'brightsites_orders.csv' : 'brightsites_shipments.csv';
+            }
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'brightsites_export.csv';
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -651,10 +700,19 @@
 
         ['danielleFormat', 'splitPairs'].forEach(id => {
             document.getElementById(id).addEventListener('change', () => {
+                if (id === 'splitPairs') {
+                    splitByLevel[activeTableLevel] = document.getElementById(id).checked;
+                    try { localStorage.setItem('brightsites_split_pairs_v1', JSON.stringify(splitByLevel)); } catch (e) { /* ignore */ }
+                }
                 if (fullResult) renderPreview(fullResult);
             });
         });
 
+        try {
+            const saved = localStorage.getItem('brightsites_report_level_v1');
+            if (['shipment', 'order', 'both'].includes(saved)) document.getElementById('reportLevel').value = saved;
+        } catch (e) { /* defaults */ }
+        changeReportLevel();
         setJobControlState();
 
         // Column configuration removed; always show all columns returned by the server.
