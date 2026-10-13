@@ -1,6 +1,7 @@
 const express = require('express');
 
 const { createJob, getJob, getJobResult, cancelJob } = require('../services/reportJobService');
+const { exportReportWorkbook } = require('../services/workbookExportService');
 const { logError, logWarn } = require('../utils/logger');
 
 const router = express.Router();
@@ -58,6 +59,29 @@ router.get('/run/:jobId/result', (req, res) => {
   }
 
   return res.status(409).json({ error: 'Report job is still running.', status: job.status });
+});
+
+router.post('/run/:jobId/workbook', async (req, res) => {
+  const payload = getJobResult(req.params.jobId);
+  if (!payload) return res.status(404).json({ error: 'Report job not found.' });
+  const { job, result } = payload;
+  if (job.status === 'failed') return res.status(500).json({ error: job.error || 'Report job failed.' });
+  if (job.status !== 'completed') return res.status(409).json({ error: 'Report is not available for download.' });
+  if (!result) return res.status(410).json({ error: 'Report result has expired. Run the report again.' });
+  if (!result.tables) return res.status(400).json({ error: 'Choose Both tables (Excel) to export a linked workbook.' });
+  try {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)
+      || Object.keys(req.body).some(key => key !== 'selections')) {
+      return res.status(400).json({ error: 'Only workbook selection settings are accepted.' });
+    }
+    const buffer = await exportReportWorkbook({ tables: result.tables, selections: req.body.selections });
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.set('Content-Disposition', 'attachment; filename="brightsites_orders_and_shipments.xlsx"');
+    return res.send(buffer);
+  } catch (err) {
+    if (!err.statusCode) logError('routes/reportRoutes.workbook', err, { jobId: req.params.jobId });
+    return res.status(err.statusCode || 500).json({ error: err.message });
+  }
 });
 
 router.post('/run/:jobId/cancel', (req, res) => {
