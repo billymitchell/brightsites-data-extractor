@@ -92,7 +92,7 @@ test('key/value extraction for personalization and options', () => {
   assert.deepStrictEqual(extractOptionPairs([{ option_name: 'Award Level', sub_option_name: '5 Star' }]), [['Product Option: Award Level', '5 Star']]);
 });
 
-test('keeps the actual option key for a Version with unlabeled values', async () => {
+test('keeps raw Version text and supplies its four confirmed split fields', async () => {
   orderData = {};
   lineItems = [{
     id: 46199084,
@@ -107,7 +107,8 @@ test('keeps the actual option key for a Version with unlabeled values', async ()
   const { rows, rowDetails } = await buildReportRows({ orders: [{ order_id: 2505 }], storeOpts: {} });
   assert.equal(rows[0][ALL_COLUMNS.indexOf('Product Options')], 'Version: Plaque, 4 Star, 2026, Hotel');
   assert.deepEqual(rowDetails[0].options, [
-    ['Product Option: Version', 'Plaque, 4 Star, 2026, Hotel'],
+    ['Product Option: Product Type', 'Plaque'], ['Product Option: Award Level', '4 Star'],
+    ['Product Option: Year', '2026'], ['Product Option: Category', 'Hotel'],
   ]);
 });
 

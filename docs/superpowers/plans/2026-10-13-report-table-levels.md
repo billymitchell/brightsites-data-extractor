@@ -10,6 +10,8 @@
 
 **Spec:** The design brief below. Implemented on `feature/report-table-levels`; verification and execution decisions are recorded in [the acceptance record](../../verification/2026-10-13-report-table-levels.md).
 
+**Subsequent correction:** Production feedback requested readable Order Level summaries without item-ID prefixes and reaffirmed the earlier approved four-part Version split. Those requirements supersede the item-prefix and no-positional-Version rules in the original design below. The confirmed Version shape expands into Product Type, Award Level, Year and Category; other named option keys continue to be discovered dynamically. See the [correction record](../../verification/2026-10-13-option-summary-correction.md).
+
 ## Design brief
 
 ### User-facing behavior

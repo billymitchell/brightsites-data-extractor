@@ -85,11 +85,11 @@ function extractOrderAmounts(order) {
   };
 }
 
-function buildRowDetails(lineItem) {
+function buildRowDetails(lineItem, optionsSettings) {
   // Named options preserve the keys needed to build columns; summary text may not.
   let options = [];
   for (const source of [lineItem.product_options, lineItem.options, lineItem.options_text]) {
-    options = extractOptionPairs(source);
+    options = extractOptionPairs(source, optionsSettings);
     if (options.length) break;
   }
   return {

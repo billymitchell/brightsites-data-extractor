@@ -16,12 +16,28 @@ test('uses arbitrary option keys consistently for structured, text, and keyed op
   }
 });
 
-test('preserves unlabeled option values instead of inventing column keys', () => {
-  for (const value of ['Plaque, 4 Star, 2026, Hotel', '2026 Edition', 'Plaque, 4 Star, Hotel', 'Plaque, 4 Star, , Hotel',
+test('preserves unrecognized Version formats instead of guessing column keys', () => {
+  for (const value of ['2026 Edition', 'Plaque, 4 Star, Hotel', 'Plaque, 4 Star, , Hotel',
     'Plaque, 4 Star, not a year, Hotel', 'Plaque, 4 Star, 2026, Hotel, Extra']) {
     assert.deepEqual(extractOptionPairs([{ option_name: 'Version', sub_option_name: value }]),
       [['Product Option: Version', value]]);
   }
+});
+
+test('expands the confirmed four-part Version format for structured, text and keyed options', () => {
+  const expected = [
+    ['Product Option: Product Type', 'Plaque'], ['Product Option: Award Level', '4 Star'],
+    ['Product Option: Year', '2026'], ['Product Option: Category', 'Hotel'],
+  ];
+  for (const input of [
+    [{ option_name: 'Version', sub_option_name: 'Plaque, 4 Star, 2026, Hotel' }],
+    'Version: Plaque, 4 Star, 2026, Hotel',
+    { Version: 'Plaque, 4 Star, 2026, Hotel' },
+  ]) assert.deepEqual(extractOptionPairs(input), expected);
+  assert.deepEqual(extractOptionPairs({ Version: ' Crystal , Recommended , 2027 , Restaurant ' }), [
+    ['Product Option: Product Type', 'Crystal'], ['Product Option: Award Level', 'Recommended'],
+    ['Product Option: Year', '2027'], ['Product Option: Category', 'Restaurant'],
+  ]);
 });
 
 test('accepts new key/value options and preserves zero and false values', () => {

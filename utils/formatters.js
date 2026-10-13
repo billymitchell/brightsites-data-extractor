@@ -85,14 +85,24 @@ function addPair(pairs, header, value) {
   else pairs.push([header, String(value)]);
 }
 
-function extractOptionPairs(opts) {
+function addOptionPair(pairs, name, value, splitVersion) {
+  // This established Version format has four known meanings. Other option keys
+  // and unrecognized Version values retain their original names and values.
+  const parts = typeof value === 'string' ? value.split(',').map(part => part.trim()) : [];
+  if (splitVersion && String(name).trim().toLowerCase() === 'version'
+    && parts.length === 4 && parts.every(Boolean) && /^\d{4}$/.test(parts[2])) {
+    ['Product Type', 'Award Level', 'Year', 'Category'].forEach((key, index) => addPair(pairs, `Product Option: ${key}`, parts[index]));
+  } else addPair(pairs, `Product Option: ${name}`, value);
+}
+
+function extractOptionPairs(opts, { splitVersion = true } = {}) {
   const pairs = [];
   if (!opts) return pairs;
   const prefix = 'Product Option: ';
   if (typeof opts === 'string') {
     opts.split(';').map((t) => t.trim()).filter(Boolean).forEach((part) => {
       const i = part.indexOf(':');
-      if (i > 0) addPair(pairs, prefix + part.slice(0, i).trim(), part.slice(i + 1).trim());
+      if (i > 0) addOptionPair(pairs, part.slice(0, i).trim(), part.slice(i + 1).trim(), splitVersion);
       else addPair(pairs, prefix + part, part);
     });
     return pairs;
@@ -101,17 +111,17 @@ function extractOptionPairs(opts) {
     opts.forEach((o) => {
       if (o == null) return;
       if (typeof o === 'string') {
-        extractOptionPairs(o).forEach(([k, v]) => addPair(pairs, k, v));
+        extractOptionPairs(o, { splitVersion }).forEach(([k, v]) => addPair(pairs, k, v));
         return;
       }
       const name = o.option_name || o.name || o.key || '';
       const sub = o.sub_option_name ?? o.value ?? o.sub ?? '';
-      if (name) addPair(pairs, prefix + name, sub);
+      if (name) addOptionPair(pairs, name, sub, splitVersion);
     });
     return pairs;
   }
   if (typeof opts === 'object') {
-    Object.entries(opts).forEach(([k, v]) => addPair(pairs, prefix + k, v));
+    Object.entries(opts).forEach(([k, v]) => addOptionPair(pairs, k, v, splitVersion));
   }
   return pairs;
 }

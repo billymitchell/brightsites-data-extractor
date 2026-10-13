@@ -61,6 +61,14 @@ test('keeps the original Version value when splitting is off', () => {
   assert.equal(view.rows[0][1], 'Version: Plaque, 4 Star, 2026, Hotel');
 });
 
+test('preview and CSV expose Version parts alongside newly named dynamic keys', () => {
+  const result = redemptionResult();
+  result.rowDetails[1].options.push(['Product Option: New Key', 'New Value']);
+  const view = buildView(result, true);
+  assert.deepEqual(view.columns, ['Order #', 'Product Option: Product Type', 'Product Option: Award Level', 'Product Option: Year', 'Product Option: Category', 'Product Option: New Key']);
+  assert.deepEqual(view.rows, [['2505', 'Plaque', '4 Star', '2026', 'Hotel', ''], ['2505', 'Plaque', 'Recommended', '2026', 'Restaurant', 'New Value']]);
+});
+
 test('hiding Product Options also hides the split Version columns', () => {
   const view = buildView(redemptionResult(), true, ['Product Options']);
   assert.deepEqual(view, { rowKeys: [], columns: ['Order #'], rows: [['2505'], ['2505']] });

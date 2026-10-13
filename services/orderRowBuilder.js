@@ -18,24 +18,28 @@ function distinctRecords(records, requireId) {
   });
   return [...unique.values()];
 }
-function summarizeDetails(items) {
+function summarizeDetails(items, optionsSettings) {
   const maps = { personalization: new Map(), options: new Map() };
   for (const item of items) {
-    const details = buildRowDetails(item);
+    const details = buildRowDetails(item, optionsSettings);
     for (const kind of Object.keys(maps)) {
       for (const [key, value] of details[kind]) {
-        const values = maps[kind].get(key) || [];
-        values.push(`${item.id}: ${value}`);
+        const values = maps[kind].get(key) || new Set();
+        values.add(String(value));
         maps[kind].set(key, values);
       }
     }
   }
-  return Object.fromEntries(Object.entries(maps).map(([kind, map]) => [kind, [...map].map(([key, values]) => [key, values.join('; ')])]));
+  return Object.fromEntries(Object.entries(maps).map(([kind, map]) => [kind, [...map].map(([key, values]) => [key, [...values].join('; ')])]));
+}
+function itemSummary(items, valueOf) {
+  return [...new Set(items.map(valueOf).filter(value => value !== '' && value != null).map(String))].join('; ');
 }
 function buildOrderReportEntry({ order, line_items = [], shipments = [] }) {
   const items = distinctRecords(line_items, true);
   const uniqueShipments = distinctRecords(shipments, false);
   const details = summarizeDetails(items);
+  const originalOptions = summarizeDetails(items, { splitVersion: false }).options;
   const amounts = extractOrderAmounts(order);
   const payment = order.payment || (Array.isArray(order.payments) ? order.payments[0] : null) || {};
   const dates = uniqueShipments.map(s => s.ship_date || s.shipped_at).filter(v => formatDateMDY(v) && Number.isFinite(Date.parse(v))).sort((a, b) => Date.parse(a) - Date.parse(b));
@@ -67,9 +71,9 @@ function buildOrderReportEntry({ order, line_items = [], shipments = [] }) {
     'Shipped Quantity': sumQuantities(shipped), 'Shipment Count': uniqueShipments.length,
     'Tracking #': [...new Set(uniqueShipments.map(s => s.tracking_number || s.tracking).filter(Boolean).map(String))].join('; '),
     'First Ship Date': formatDateMDY(dates[0]), 'Last Ship Date': formatDateMDY(dates[dates.length - 1]),
-    'Product Name': items.map(i => `${i.id}: ${i.name || i.product_name || ''}`).join('; '),
-    SKU: items.map(i => `${i.id}: ${pickFirstValue(i, 'final_sku', 'sku', 'product_sku', 'variant_sku', 'item_sku', 'sku_code', 'skuNumber', 'product_code', 'code')}`).join('; '),
-    'Product Options': details.options.map(([key, value]) => `${key.replace('Product Option: ', '')}: ${value}`).join('; '),
+    'Product Name': itemSummary(items, i => i.name || i.product_name || ''),
+    SKU: itemSummary(items, i => pickFirstValue(i, 'final_sku', 'sku', 'product_sku', 'variant_sku', 'item_sku', 'sku_code', 'skuNumber', 'product_code', 'code')),
+    'Product Options': originalOptions.map(([key, value]) => `${key.replace('Product Option: ', '')}: ${value}`).join('; '),
     'Product Personalization': details.personalization.map(([key, value]) => `${key.replace('Product Personalization: ', '')}: ${value}`).join('; '),
   };
   const contacts = buildStructuredContactFields(order);
