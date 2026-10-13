@@ -27,3 +27,12 @@ test('accepts a valid report date range', () => {
   assert.equal(context.params.created_at_from, '2026-02-01T00:00:00.000Z');
   assert.equal(context.params.created_at_to, '2026-02-02T23:59:59.999Z');
 });
+
+test('validates report level and allows UPS only when shipment rows are requested', () => {
+  const base = { storeKey: 'test', start: '2026-02-01', end: '2026-02-02' };
+  assert.equal(validateRunRequest(base).reportLevel, 'shipment');
+  assert.equal(validateRunRequest({ ...base, reportLevel: 'both', includeUps: true }).reportLevel, 'both');
+  assert.equal(validateRunRequest({ ...base, reportLevel: 'order' }).reportLevel, 'order');
+  assert.throws(() => validateRunRequest({ ...base, reportLevel: 'order', includeUps: true }), { statusCode: 400 });
+  assert.throws(() => validateRunRequest({ ...base, reportLevel: 'unknown' }), { statusCode: 400 });
+});

@@ -34,7 +34,35 @@ const COLUMN_GROUPS = [
   { label: 'Shipping contact', columns: STRUCTURED_COLUMNS.filter((c) => c.startsWith('Shipping ')) },
 ];
 
+function normalizeReportLevel(value = 'shipment') {
+  if (!['order', 'shipment', 'both'].includes(value)) {
+    throw Object.assign(new Error('reportLevel must be order, shipment, or both.'), { statusCode: 400 });
+  }
+  return value;
+}
+
+const ORDER_CORE = ['Order #', 'Placed', 'Order Status', 'Order Total', 'Order Item Total',
+  'Store Shipping Cost', 'Customer Email', 'Unique Item Count', 'Original Quantity',
+  'Shipped Quantity', 'Shipment Count', 'Tracking #'];
+const ORDER_GROUPS = [
+  COLUMN_GROUPS[0],
+  { label: 'Order charges', columns: ['Order Sales Tax', 'Order Shipping Sales Tax', 'Order Discounts', 'Store Shipping Cost'] },
+  COLUMN_GROUPS[4], COLUMN_GROUPS[5], COLUMN_GROUPS[6],
+  { label: 'Fulfillment summary', columns: ['Unique Item Count', 'Original Quantity', 'Shipped Quantity', 'Shipment Count', 'Tracking #', 'First Ship Date', 'Last Ship Date', 'In-Hands Date'] },
+  { label: 'Item summaries', columns: ['Product Name', 'SKU', 'Product Options', 'Product Personalization'] },
+];
+const ORDER_COLUMNS = ORDER_GROUPS.flatMap(g => g.columns);
+function getReportColumnConfig(reportLevel = 'shipment') {
+  normalizeReportLevel(reportLevel);
+  if (reportLevel === 'both') throw Object.assign(new Error('Choose order or shipment for a column catalog.'), { statusCode: 400 });
+  return reportLevel === 'order'
+    ? { columns: ORDER_COLUMNS, core: ORDER_CORE, groups: ORDER_GROUPS }
+    : { columns: ALL_COLUMNS, core: COLUMNS, groups: COLUMN_GROUPS };
+}
+
 module.exports = {
+  normalizeReportLevel,
+  getReportColumnConfig,
   COLUMN_GROUPS,
   PORT,
   FREE_LIMIT,

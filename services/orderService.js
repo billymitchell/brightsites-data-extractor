@@ -1,4 +1,6 @@
 const { fetchAllPages, loadOrder } = require('../lib/brightSites');
+const { deduplicateOrders } = require('./reportFields');
+const { normalizeReportLevel } = require('../config/report');
 const { getConfiguredStores } = require('../config/stores');
 const { logWarn } = require('../utils/logger');
 const { isCanceledError, throwIfCanceled } = require('../utils/cancel');
@@ -99,6 +101,10 @@ async function fetchOrders(params, statuses, storeOpts, options = {}) {
 }
 
 function validateRunRequest(body = {}) {
+  const reportLevel = normalizeReportLevel(body.reportLevel);
+  if (reportLevel === 'order' && body.includeUps === true) {
+    throw createHttpError(400, 'UPS tracking is available in Shipment Level or Both tables.');
+  }
   const storeKey = body.storeKey;
   const stores = getConfiguredStores();
   if (!storeKey) {
@@ -141,6 +147,7 @@ function validateRunRequest(body = {}) {
 
   return {
     store,
+    reportLevel,
     storeKey,
     storeOpts,
     params,
@@ -212,7 +219,7 @@ async function buildDebugInfo(orders, storeOpts, options = {}) {
 }
 
 async function getRunContext(body = {}, options = {}) {
-  const { params, statuses, storeOpts } = validateRunRequest(body);
+  const { params, statuses, storeOpts, reportLevel } = validateRunRequest(body);
   const { onProgress, isCanceled } = options;
 
   if (typeof onProgress === 'function') {
@@ -223,7 +230,8 @@ async function getRunContext(body = {}, options = {}) {
   }
 
   throwIfCanceled(isCanceled, 'Report job canceled before fetching orders.');
-  const orders = await fetchOrders(params, statuses, storeOpts, options);
+  const fetched = await fetchOrders(params, statuses, storeOpts, options);
+  const orders = reportLevel === 'shipment' ? fetched : deduplicateOrders(fetched);
   throwIfCanceled(isCanceled, 'Report job canceled after fetching orders.');
 
   if (typeof onProgress === 'function') {
@@ -236,10 +244,11 @@ async function getRunContext(body = {}, options = {}) {
     });
   }
 
-  const debugInfo = await buildDebugInfo(orders, storeOpts, { isCanceled });
+  const debugInfo = reportLevel === 'shipment' ? await buildDebugInfo(orders, storeOpts, { isCanceled }) : null;
 
   return {
     orders,
+    reportLevel,
     debugInfo,
     storeOpts,
   };

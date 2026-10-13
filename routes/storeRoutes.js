@@ -2,7 +2,7 @@ const express = require('express');
 
 const { getConfiguredStores } = require('../config/stores');
 
-const { COLUMN_GROUPS, COLUMNS } = require('../config/report');
+const { getReportColumnConfig } = require('../config/report');
 const { UPS_COLUMNS } = require('../lib/ups');
 
 const router = express.Router();
@@ -18,10 +18,14 @@ router.get('/stores', (req, res) => {
 });
 
 router.get('/columns', (req, res) => {
-  res.json({
-    groups: COLUMN_GROUPS.concat([{ label: 'UPS tracking (when enabled)', columns: UPS_COLUMNS }]),
-    core: COLUMNS,
-  });
+  try {
+    const config = getReportColumnConfig(req.query.reportLevel);
+    const groups = req.query.reportLevel === 'order' ? config.groups
+      : config.groups.concat([{ label: 'UPS tracking (when enabled)', columns: UPS_COLUMNS }]);
+    res.json({ groups, core: config.core });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
