@@ -96,11 +96,17 @@ function extractOrderAmounts(order) {
 }
 
 function buildRowDetails(lineItem) {
+  // Named options preserve the keys needed to build columns; summary text may not.
+  let options = [];
+  for (const source of [lineItem.product_options, lineItem.options, lineItem.options_text]) {
+    options = extractOptionPairs(source);
+    if (options.length) break;
+  }
   return {
     personalization: extractPersonalizationPairs(
       lineItem.product_personalizations || lineItem.personalizations || lineItem.personalization || lineItem.product_personalization
     ),
-    options: extractOptionPairs(lineItem.options_text || lineItem.product_options || lineItem.options),
+    options,
   };
 }
 

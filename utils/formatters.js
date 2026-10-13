@@ -99,8 +99,8 @@ function extractOptionPairs(opts) {
         extractOptionPairs(o).forEach(([k, v]) => addPair(pairs, k, v));
         return;
       }
-      const name = o.option_name || o.name || '';
-      const sub = o.sub_option_name || o.value || o.sub || '';
+      const name = o.option_name || o.name || o.key || '';
+      const sub = o.sub_option_name ?? o.value ?? o.sub ?? '';
       if (name) addPair(pairs, prefix + name, sub);
     });
     return pairs;

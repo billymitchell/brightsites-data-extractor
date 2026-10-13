@@ -91,3 +91,48 @@ test('key/value extraction for personalization and options', () => {
   }]), [['Product Personalization: Establishment Name', 'Pan Pacific London'], ['Product Personalization: Establishment Name Price', '$0.0']]);
   assert.deepStrictEqual(extractOptionPairs([{ option_name: 'Award Level', sub_option_name: '5 Star' }]), [['Product Option: Award Level', '5 Star']]);
 });
+
+test('keeps the actual option key for a Version with unlabeled values', async () => {
+  orderData = {};
+  lineItems = [{
+    id: 46199084,
+    product_options: [{
+      option_name: 'Version',
+      sub_option_name: 'Plaque, 4 Star, 2026, Hotel',
+      option_type: 'general',
+      option_id: 15510657,
+      sub_option_id: 39213314,
+    }],
+  }];
+  const { rows, rowDetails } = await buildReportRows({ orders: [{ order_id: 2505 }], storeOpts: {} });
+  assert.equal(rows[0][ALL_COLUMNS.indexOf('Product Options')], 'Version: Plaque, 4 Star, 2026, Hotel');
+  assert.deepEqual(rowDetails[0].options, [
+    ['Product Option: Version', 'Plaque, 4 Star, 2026, Hotel'],
+  ]);
+});
+
+test('takes dynamic split keys from structured options rather than summary text', async () => {
+  orderData = {};
+  lineItems = [{
+    id: 7,
+    options_text: 'Plaque, Matte',
+    product_options: [
+      { option_name: 'Product Type', sub_option_name: 'Plaque' },
+      { option_name: 'Finish', sub_option_name: 'Matte' },
+    ],
+  }, {
+    id: 8,
+    product_options: [],
+    options: [{ key: 'New Option', value: 'New Value' }],
+  }, {
+    id: 9,
+    product_options: [],
+    options_text: 'Finish: Glossy; Warranty: Extended',
+  }];
+  const { rowDetails } = await buildReportRows({ orders: [{ id: 1 }], storeOpts: {} });
+  assert.deepEqual(rowDetails.map((d) => d.options), [
+    [['Product Option: Product Type', 'Plaque'], ['Product Option: Finish', 'Matte']],
+    [['Product Option: New Option', 'New Value']],
+    [['Product Option: Finish', 'Glossy'], ['Product Option: Warranty', 'Extended']],
+  ]);
+});
