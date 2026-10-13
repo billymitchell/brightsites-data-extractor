@@ -1,3 +1,5 @@
+const { getReportColumnConfig, normalizeReportLevel } = require('../config/report');
+const { buildOrderReportEntry } = require('./orderRowBuilder');
 const { loadOrder, loadLineItems, loadShipments } = require('../lib/brightSites');
 const { promisePool } = require('../utils/async');
 const {
@@ -9,7 +11,7 @@ const { pickFirstValue } = require('../utils/fields');
 const { logWarn } = require('../utils/logger');
 const { throwIfCanceled } = require('../utils/cancel');
 
-const { aggregateShipmentLineItems, buildStructuredContactFields, extractOrderAmounts, buildRowDetails, toMoney } = require('./reportFields');
+const { aggregateShipmentLineItems, buildStructuredContactFields, extractOrderAmounts, buildRowDetails, toMoney, makeOrderKey, deduplicateOrders, orderLookupId } = require('./reportFields');
 
 function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLanded, shipMethod, shipDate, shippedQty }) {
   const structured = buildStructuredContactFields(order);
@@ -107,16 +109,22 @@ function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLande
   ];
 }
 
-async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCanceled, maxRows = Infinity }) {
+async function buildReportTables({ orders, storeOpts, debugInfo, onProgress, isCanceled, maxRows = Infinity, reportLevel = 'shipment' }) {
+  normalizeReportLevel(reportLevel);
+  if (reportLevel !== 'shipment') orders = deduplicateOrders(orders);
+  const orderRows = [], orderDetails = [], orderKeys = [], rowKeys = [];
+  let currentOrderKey;
+  const checkLimit = () => {
+    if (orderRows.length + rows.length >= maxRows) throw new Error(`Report exceeds the maximum of ${maxRows} rows. Narrow the date range and try again.`);
+  };
   let currentDebugInfo = debugInfo;
   const rows = [];
   const rowDetails = [];
   let ordersProcessed = 0;
   const appendRow = (row, lineItem) => {
-    if (rows.length >= maxRows) {
-      throw new Error(`Report exceeds the maximum of ${maxRows} rows. Narrow the date range and try again.`);
-    }
+    checkLimit();
     rows.push(row);
+    rowKeys.push(currentOrderKey);
     rowDetails.push(buildRowDetails(lineItem));
   };
 
@@ -135,11 +143,11 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
     orders,
     async (order) => {
       throwIfCanceled(isCanceled, 'Report job canceled while enriching orders.');
-      const orderIdentifier = order.id || order.order_id || order.orderNumber || order.number;
+      const orderIdentifier = orderLookupId(order);
       const [fullOrder, lineItems, shipments] = await Promise.all([
-        loadOrder(orderIdentifier, Object.assign({}, storeOpts, { isCanceled })),
-        loadLineItems(orderIdentifier, Object.assign({}, storeOpts, { isCanceled })),
-        loadShipments(orderIdentifier, Object.assign({}, storeOpts, { isCanceled })),
+        loadOrder(orderIdentifier, Object.assign({}, storeOpts, { isCanceled, failOnError: reportLevel !== 'shipment' })),
+        loadLineItems(orderIdentifier, Object.assign({}, storeOpts, { isCanceled, failOnError: reportLevel !== 'shipment' })),
+        loadShipments(orderIdentifier, Object.assign({}, storeOpts, { isCanceled, failOnError: reportLevel !== 'shipment' })),
       ]);
       const mergedOrder = Object.assign({}, order, fullOrder || {});
       ordersProcessed += 1;
@@ -179,6 +187,15 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
       throw new Error(entry.error);
     }
     const { order, line_items = [], shipments = [] } = entry;
+    currentOrderKey = makeOrderKey(storeOpts.subdomain, order);
+    if (reportLevel !== 'shipment') {
+      checkLimit();
+      const summary = buildOrderReportEntry(entry);
+      orderRows.push(summary.row);
+      orderDetails.push(summary.rowDetails);
+      orderKeys.push(currentOrderKey);
+    }
+    if (reportLevel !== 'order') {
     const placed = formatDateMDY(order.placed_at || order.created_at);
     const liMap = new Map();
     line_items.forEach((li) => {
@@ -251,26 +268,31 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
       }), lineItem);
     });
 
+    }
+
     rowsBuiltFromOrders += 1;
     if (typeof onProgress === 'function') {
       onProgress({
         phase: 'building-rows',
         ordersProcessed: rowsBuiltFromOrders,
         ordersTotal: enriched.length,
-        rowsBuilt: rows.length,
+        rowsBuilt: rows.length + orderRows.length,
         message: `Built rows for ${rowsBuiltFromOrders} of ${enriched.length} orders.`,
       });
     }
   });
 
-  return {
-    rows,
-    rowDetails,
-    debugInfo: currentDebugInfo,
-  };
+  const tables = {};
+  if (reportLevel !== 'shipment') tables.order = { columns: getReportColumnConfig('order').columns, rows: orderRows, rowDetails: orderDetails, rowKeys: orderKeys };
+  if (reportLevel !== 'order') tables.shipment = { columns: getReportColumnConfig('shipment').columns, rows, rowDetails, rowKeys };
+  if (!currentDebugInfo && enriched.length) currentDebugInfo = { order_id: enriched[0].order.order_id || enriched[0].order.id };
+  return { tables, debugInfo: currentDebugInfo };
+}
+async function buildReportRows(options) {
+  const level = options.reportLevel || 'shipment';
+  getReportColumnConfig(level);
+  const result = await buildReportTables({ ...options, reportLevel: level });
+  return { ...result.tables[level], debugInfo: result.debugInfo };
 }
 
-module.exports = {
-  buildReportRows,
-  extractOrderAmounts,
-};
+module.exports = { buildReportRows, buildReportTables, extractOrderAmounts };

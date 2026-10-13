@@ -1,8 +1,8 @@
 const { randomUUID } = require('crypto');
 
-const { ALL_COLUMNS, MAX_REPORT_ROWS } = require('../config/report');
+const { MAX_REPORT_ROWS } = require('../config/report');
 const { getRunContext, validateRunRequest } = require('./orderService');
-const { buildReportRows } = require('./reportRowBuilder');
+const { buildReportTables } = require('./reportRowBuilder');
 const { createCanceledError, isCanceledError } = require('../utils/cancel');
 const { logError, logInfo } = require('../utils/logger');
 
@@ -22,6 +22,8 @@ function recordHistory(job) {
     start: job.request.start,
     end: job.request.end,
     statusFilter: job.request.status,
+    reportLevel: job.request.reportLevel,
+    rowCounts: job.result && job.result.meta.rowCounts,
     createdAt: job.createdAt,
     durationSec: Number.isNaN(ended - started) ? null : Math.round((ended - started) / 100) / 10,
     orders: job.progress && job.progress.ordersTotal,
@@ -136,8 +138,9 @@ async function runJob(job) {
 
     if (job.cancelRequested) throw createCanceledError();
 
-    const report = await buildReportRows({
+    const report = await buildReportTables({
       orders: context.orders,
+      reportLevel: job.request.reportLevel,
       storeOpts: context.storeOpts,
       debugInfo: context.debugInfo,
       maxRows: MAX_REPORT_ROWS,
@@ -147,31 +150,25 @@ async function runJob(job) {
 
     if (job.cancelRequested) throw createCanceledError();
 
-    let columns = ALL_COLUMNS;
     let upsInfo = null;
     if (job.request.includeUps) {
       if (!ups.isConfigured()) throw new Error('UPS lookup is not set up on this server (UPS_CLIENT_ID / UPS_CLIENT_SECRET missing).');
-      upsInfo = await ups.enrichRowsWithUps(report.rows, ALL_COLUMNS.indexOf('Tracking #'), {
+      const shipment = report.tables.shipment;
+      upsInfo = await ups.enrichRowsWithUps(shipment.rows, shipment.columns.indexOf('Tracking #'), {
         isCanceled: () => job.cancelRequested,
         onProgress: (progress) => updateJobProgress(job, progress),
       });
-      columns = ALL_COLUMNS.concat(ups.UPS_COLUMNS);
+      shipment.columns = shipment.columns.concat(ups.UPS_COLUMNS);
       if (job.cancelRequested) throw createCanceledError();
     }
-
-    const meta = {
-      orders: context.orders.length,
-      rows: report.rows.length,
-    };
+    const rowCounts = Object.fromEntries(Object.entries(report.tables).map(([level, table]) => [level, table.rows.length]));
+    const meta = { orders: context.orders.length, rows: Object.values(rowCounts).reduce((a, b) => a + b, 0),
+      rowCounts, reportLevel: job.request.reportLevel };
     if (upsInfo) meta.ups = upsInfo;
     if (report.debugInfo) meta.debug = report.debugInfo;
-
-    job.result = {
-      columns,
-      rows: report.rows,
-      rowDetails: report.rowDetails,
-      meta,
-    };
+    job.result = job.request.reportLevel === 'both'
+      ? { tables: report.tables, meta }
+      : { ...report.tables[job.request.reportLevel], meta };
     job.status = 'completed';
     job.completedAt = nowIso();
     evictOldestCompletedResults();
@@ -179,8 +176,8 @@ async function runJob(job) {
       phase: 'completed',
       ordersProcessed: context.orders.length,
       ordersTotal: context.orders.length,
-      rowsBuilt: report.rows.length,
-      message: `Report ready. ${report.rows.length} rows built from ${context.orders.length} orders.`,
+      rowsBuilt: meta.rows,
+      message: `Report ready. ${meta.rows} rows built from ${context.orders.length} orders.`,
     });
 
     recordHistory(job);
@@ -217,7 +214,7 @@ async function runJob(job) {
 }
 
 function createJob(body = {}) {
-  validateRunRequest(body);
+  const { reportLevel } = validateRunRequest(body);
   cleanupExpiredJobs();
   const activeJobs = Array.from(jobs.values())
     .filter((job) => ['queued', 'running', 'canceling'].includes(job.status)).length;
@@ -232,6 +229,7 @@ function createJob(body = {}) {
     status: 'queued',
     request: {
       storeKey: body.storeKey,
+      reportLevel,
       start: body.start,
       end: body.end,
       status: body.status || '',
