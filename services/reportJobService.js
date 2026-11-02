@@ -233,7 +233,7 @@ function createJob(body = {}) {
       start: body.start,
       end: body.end,
       status: body.status || '',
-      includeUps: body.includeUps === true,
+      includeUps: reportLevel !== 'order' && body.includeUps !== false,
     },
     createdAt: nowIso(),
     startedAt: null,

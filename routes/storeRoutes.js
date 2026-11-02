@@ -21,7 +21,7 @@ router.get('/columns', (req, res) => {
   try {
     const config = getReportColumnConfig(req.query.reportLevel);
     const groups = req.query.reportLevel === 'order' ? config.groups
-      : config.groups.concat([{ label: 'UPS tracking (when enabled)', columns: UPS_COLUMNS }]);
+      : config.groups.concat([{ label: 'UPS tracking', columns: UPS_COLUMNS }]);
     res.json({ groups, core: config.core });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });

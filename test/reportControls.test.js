@@ -15,7 +15,14 @@ function harness() {
     setAttribute() {}
     remove() {}
   }
-  const document = { getElementById(id) { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); }, createElement: () => new Element(), createTextNode: s => ({textContent:s}), querySelectorAll: () => [], body: new Element() };
+  const document = {
+    getElementById(id) {
+      if (['includeUps', 'upsHelp'].includes(id)) throw new Error(`Removed UPS control accessed: ${id}`);
+      if (!elements.has(id)) elements.set(id, new Element());
+      return elements.get(id);
+    },
+    createElement: () => new Element(), createTextNode: s => ({textContent:s}), querySelectorAll: () => [], body: new Element(),
+  };
   document.getElementById('reportLevel').value = 'shipment';
   const fetch = async (url, opts) => {
     requests.push({ url, opts });
@@ -40,14 +47,23 @@ test('table-type controls enforce supported formats and clear stale results', as
   mode.value = 'both';
   await mode.events.change();
   assert.equal(document.getElementById('danielleFormat').disabled, true);
-  assert.equal(document.getElementById('includeUps').disabled, false);
   assert.equal(document.getElementById('download').disabled, true);
   assert.equal(document.getElementById('download').textContent, 'Download Excel');
   assert.equal(vm.runInContext('fullResult', context), null);
   mode.value = 'order'; await mode.events.change();
-  assert.equal(document.getElementById('includeUps').disabled, true);
   vm.runInContext("activeJobId = 'job'; setJobControlState();", context);
   assert.equal(mode.disabled, true);
+});
+test('UPS enrichment no longer has an opt-in control or request flag', async () => {
+  assert.doesNotMatch(html, /id="includeUps"|id="upsHelp"|Add UPS tracking data/);
+  const { document, requests } = harness();
+  document.getElementById('storeSelect').value = 'test';
+  document.getElementById('start').value = '2026-02-01';
+  document.getElementById('end').value = '2026-02-02';
+  await document.getElementById('run').events.click();
+  const request = requests.find(r => r.url === '/api/run');
+  assert.ok(request);
+  assert.equal(Object.hasOwn(JSON.parse(request.opts.body), 'includeUps'), false);
 });
 test('preview tab switching reuses completed tables and retains independent preferences', async () => {
   const { document, requests, context } = harness();

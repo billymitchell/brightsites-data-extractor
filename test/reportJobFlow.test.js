@@ -20,7 +20,7 @@ async function finished(id) {
 }
 test('concurrent jobs publish independent levels, schemas and row counts', async () => {
   const base = { storeKey: 'test', start: '2026-02-01', end: '2026-02-02' };
-  const paired = jobs.createJob({ ...base, reportLevel: 'both' });
+  const paired = jobs.createJob({ ...base, reportLevel: 'both', includeUps: false });
   const single = jobs.createJob({ ...base, reportLevel: 'order' });
   assert.equal((await finished(paired.id)).status, 'completed');
   assert.equal((await finished(single.id)).status, 'completed');
@@ -32,16 +32,40 @@ test('concurrent jobs publish independent levels, schemas and row counts', async
   assert.equal(order.rows.length, 1);
   assert.ok(order.columns.includes('Unique Item Count'));
 });
-test('UPS enriches only shipment rows of a paired result', async () => {
+test('UPS enriches shipment and paired reports by default, but not order reports', async () => {
   const original = { configured: ups.isConfigured, enrich: ups.enrichRowsWithUps };
   ups.isConfigured = () => true;
-  ups.enrichRowsWithUps = async rows => { assert.equal(rows.length, 3); rows.forEach(r => r.push(...ups.UPS_COLUMNS.map(() => 'fixture'))); return { lookedUp: 2, failed: 0 }; };
+  let lookups = 0;
+  ups.enrichRowsWithUps = async rows => { lookups++; assert.equal(rows.length, 3); rows.forEach(r => r.push(...ups.UPS_COLUMNS.map(() => 'fixture'))); return { lookedUp: 2, failed: 0 }; };
   try {
-    const job = jobs.createJob({ storeKey: 'test', start: '2026-02-01', end: '2026-02-02', reportLevel: 'both', includeUps: true });
-    assert.equal((await finished(job.id)).status, 'completed');
-    const { tables } = jobs.getJobResult(job.id).result;
-    assert.ok(tables.shipment.columns.includes('UPS Status'));
-    assert.ok(!tables.order.columns.includes('UPS Status'));
-    assert.equal(tables.shipment.columns.length, tables.shipment.rows[0].length);
+    for (const reportLevel of [undefined, 'both', 'order']) {
+      const job = jobs.createJob({ storeKey: 'test', start: '2026-02-01', end: '2026-02-02', reportLevel });
+      assert.equal((await finished(job.id)).status, 'completed');
+      const result = jobs.getJobResult(job.id).result;
+      const shipment = result.tables ? result.tables.shipment : reportLevel !== 'order' ? result : null;
+      if (shipment) {
+        assert.ok(shipment.columns.includes('UPS Status'));
+        assert.equal(shipment.columns.length, shipment.rows[0].length);
+        assert.deepEqual(result.meta.ups, { lookedUp: 2, failed: 0 });
+      }
+      const order = result.tables ? result.tables.order : reportLevel === 'order' ? result : null;
+      if (order) assert.ok(!order.columns.includes('UPS Status'));
+    }
+    assert.equal(lookups, 2);
   } finally { ups.isConfigured = original.configured; ups.enrichRowsWithUps = original.enrich; }
+});
+
+test('default UPS enrichment fails explicitly when credentials are missing', async () => {
+  const original = ups.isConfigured;
+  ups.isConfigured = () => false;
+  try {
+    const base = { storeKey: 'test', start: '2026-02-01', end: '2026-02-02' };
+    const job = jobs.createJob(base);
+    const failed = await finished(job.id);
+    assert.equal(failed.status, 'failed');
+    assert.match(failed.error, /UPS_CLIENT_ID \/ UPS_CLIENT_SECRET missing/);
+    const optedOut = jobs.createJob({ ...base, includeUps: false });
+    assert.equal((await finished(optedOut.id)).status, 'completed');
+    assert.ok(!jobs.getJobResult(optedOut.id).result.columns.includes('UPS Status'));
+  } finally { ups.isConfigured = original; }
 });

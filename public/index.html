@@ -90,10 +90,6 @@
                 Danielle's Format <small id="danielleHelp" hidden>Available in Shipment Level.</small>
             </label>
             <label>
-                <input type="checkbox" id="includeUps" role="switch" />
-                Add UPS tracking data (status, service, weight, delivery date) <small id="upsHelp" hidden>Available in Shipment Level or Both tables.</small>
-            </label>
-            <label>
                 <input type="checkbox" id="splitPairs" role="switch" />
                 Split Product Personalization and Product Options into one column per key (value in the cell)
             </label>
@@ -431,7 +427,6 @@
                 start: start,
                 end: end
             };
-            if (document.getElementById('includeUps').checked) payload.includeUps = true;
             if (statuses && statuses.length) payload.status = statuses.join(',');
 
             resetResultState();
@@ -515,10 +510,6 @@
             danielle.disabled = mode !== 'shipment';
             if (danielle.disabled) danielle.checked = false;
             document.getElementById('danielleHelp').hidden = !danielle.disabled;
-            const ups = document.getElementById('includeUps');
-            ups.disabled = mode === 'order';
-            if (ups.disabled) ups.checked = false;
-            document.getElementById('upsHelp').hidden = !ups.disabled;
             downloadButton.textContent = mode === 'both' ? 'Download Excel' : 'Download CSV';
             metaEl.textContent = 'Choose your columns, then run a report.';
             await activateTable(mode === 'shipment' ? 'shipment' : 'order');
