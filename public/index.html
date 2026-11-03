@@ -13,6 +13,9 @@
         .app-header a[role=button] { margin: 0; width: auto; }
         .app-header form, .app-header button { margin: 0; width: auto; }
         #columnGroups fieldset { margin-top: 1rem; } #columnGroups fieldset label { display: inline-block; width: 240px; margin-right: .5rem; }
+        #columnOrder li { display: flex; align-items: center; gap: .5rem; margin-bottom: .3rem; }
+        #columnOrder li span { flex: 1; }
+        #columnOrder button { width: auto; margin: 0; padding: .2rem .5rem; }
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0 1rem; align-items: start; }
         .actions { display: flex; gap: .75rem; flex-wrap: wrap; }
         .actions button { width: auto; }
@@ -101,7 +104,14 @@
                     <button type="button" class="secondary outline" id="colsNone">Clear</button>
                 </div>
                 <small>Applies to the active table's preview and download. Not used with Danielle's Format.</small>
+                <p id="preferenceStatus" role="status" aria-live="polite">Loading column defaults...</p>
+                <button type="button" class="secondary outline" id="retryPreferences" hidden>Retry saving / loading defaults</button>
                 <div id="columnGroups"></div>
+                <details>
+                    <summary>Arrange selected columns</summary>
+                    <small>Move columns up or down. Split option/personalization columns follow their parent field. Excel keeps its required navigation columns.</small>
+                    <ol id="columnOrder" aria-label="Selected column order"></ol>
+                </details>
             </details>
             <div class="actions">
                 <button id="run">Run</button>
@@ -129,6 +139,7 @@
 
     <script src="/csv.js"></script>
     <script src="/reportView.js"></script>
+    <script src="/columnPreferences.js"></script>
     <script>
         const _origFetch = window.fetch.bind(window);
         window.fetch = async (...args) => {
@@ -397,6 +408,10 @@
 
         runButton.addEventListener('click', async () => {
             if (activeJobId) return;
+            if (!preferencesLoaded || catalogLoading) {
+                metaEl.textContent = 'Load your column defaults before running the report. Use Retry if loading failed.';
+                return;
+            }
 
             let statuses = Array.from(document.querySelectorAll('#statusGroup input[name=status]:checked')).map(o => o.value);
 
@@ -482,10 +497,51 @@
         const columnStorageKeys = { shipment: 'brightsites_deselected_columns_v2', order: 'brightsites_deselected_columns_order_v1' };
         const hiddenByLevel = { shipment: new Set(), order: new Set() };
         const splitByLevel = { shipment: false, order: false };
-        for (const level of ['order', 'shipment']) {
-            try { hiddenByLevel[level] = new Set(JSON.parse(localStorage.getItem(columnStorageKeys[level]) || '[]')); } catch (e) { /* use defaults */ }
+        const orderByLevel = { shipment: [], order: [] };
+        let accountPreferences = false;
+        let preferencesLoaded = false;
+        const preferenceStatus = document.getElementById('preferenceStatus');
+        const retryPreferences = document.getElementById('retryPreferences');
+        const preferenceSync = BrightSitesColumnPreferences.createPreferenceSync({
+            fetch: (...args) => fetch(...args),
+            onStatus(status, message) {
+                preferenceStatus.textContent = status === 'saving' ? 'Saving column defaults to your account...'
+                    : status === 'saved' ? 'Column defaults saved to your account.' : message;
+                retryPreferences.hidden = status !== 'error';
+            }
+        });
+        async function loadAccountPreferences() {
+            try {
+                const res = await fetch('/api/preferences/columns');
+                if (!res.ok) throw new Error('Could not load your account column defaults. Retry before changing columns.');
+                const data = await res.json();
+                if (typeof data.account !== 'boolean') throw new Error('Invalid column preferences response. Please retry.');
+                accountPreferences = data.account;
+                for (const level of ['order', 'shipment']) {
+                    if (accountPreferences) {
+                        const layout = data.layouts && data.layouts[level];
+                        hiddenByLevel[level] = new Set(layout ? layout.deselectedColumns : []);
+                        orderByLevel[level] = layout ? layout.columnOrder : [];
+                        splitByLevel[level] = Boolean(layout && layout.splitPairs);
+                    } else {
+                        hiddenByLevel[level] = new Set(JSON.parse(localStorage.getItem(columnStorageKeys[level]) || '[]'));
+                        orderByLevel[level] = JSON.parse(localStorage.getItem('brightsites_column_order_' + level) || '[]');
+                        const split = JSON.parse(localStorage.getItem('brightsites_split_pairs_v1') || '{}');
+                        splitByLevel[level] = Boolean(split[level]);
+                    }
+                }
+                preferencesLoaded = true;
+                deselectedColumns = hiddenByLevel[activeTableLevel];
+                document.getElementById('splitPairs').checked = splitByLevel[activeTableLevel];
+                preferenceStatus.textContent = accountPreferences ? 'Column changes save automatically to your account.'
+                    : 'Column defaults are saved only in this browser. Sign in with a company account to sync.';
+                retryPreferences.hidden = true;
+            } catch (err) {
+                console.error('loadAccountPreferences', err);
+                preferenceStatus.textContent = err.message;
+                retryPreferences.hidden = false;
+            }
         }
-        try { Object.assign(splitByLevel, JSON.parse(localStorage.getItem('brightsites_split_pairs_v1') || '{}')); } catch (e) { /* use defaults */ }
         let deselectedColumns = hiddenByLevel.shipment;
         let columnCatalog = { groups: [], core: [] };
         let catalogRequestId = 0;
@@ -499,8 +555,8 @@
             document.getElementById('previewShipments').setAttribute('aria-pressed', String(level === 'shipment'));
             document.getElementById('previewOrders').className = level === 'order' ? '' : 'outline';
             document.getElementById('previewShipments').className = level === 'shipment' ? '' : 'outline';
-            if (fullResult) renderPreview(fullResult);
             await loadColumnPicker();
+            if (fullResult) renderPreview(fullResult);
         }
         async function changeReportLevel() {
             const mode = document.getElementById('reportLevel').value;
@@ -519,11 +575,69 @@
         document.getElementById('previewShipments').addEventListener('click', () => activateTable('shipment'));
 
         function saveColumnSelection() {
-            try { localStorage.setItem(columnStorageKeys[activeTableLevel], JSON.stringify([...deselectedColumns])); } catch (e) { /* ignore */ }
+            if (!preferencesLoaded || catalogLoading) return;
+            if (accountPreferences) {
+                preferenceSync.save(activeTableLevel, {
+                    deselectedColumns: [...deselectedColumns],
+                    columnOrder: [...orderByLevel[activeTableLevel]],
+                    splitPairs: Boolean(splitByLevel[activeTableLevel])
+                });
+            } else {
+                try {
+                    localStorage.setItem(columnStorageKeys[activeTableLevel], JSON.stringify([...deselectedColumns]));
+                    localStorage.setItem('brightsites_column_order_' + activeTableLevel, JSON.stringify(orderByLevel[activeTableLevel]));
+                    localStorage.setItem('brightsites_split_pairs_v1', JSON.stringify(splitByLevel));
+                } catch (err) {
+                    console.error('saveColumnSelection', err);
+                    preferenceStatus.textContent = 'Could not save column defaults in this browser.';
+                }
+            }
+            updateColumnDisplay();
+        }
+        function updateColumnDisplay() {
             const all = columnCatalog.groups.flatMap(g => g.columns);
             const total = all.length;
             document.getElementById('columnCount').textContent = total ? `(${all.filter(c => !deselectedColumns.has(c)).length} of ${total} selected)` : '';
+            renderColumnOrder();
             if (fullResult) renderPreview(fullResult);
+        }
+        function selectedColumns(columns, level) {
+            return BrightSitesColumnPreferences.orderedColumns(columns, orderByLevel[level])
+                .filter(c => !hiddenByLevel[level].has(c));
+        }
+        function renderColumnOrder() {
+            const host = document.getElementById('columnOrder');
+            host.innerHTML = '';
+            const level = activeTableLevel;
+            const requestId = catalogRequestId;
+            const columns = selectedColumns(columnCatalog.groups.flatMap(g => g.columns), level);
+            columns.forEach((column, index) => {
+                const item = document.createElement('li');
+                const name = document.createElement('span');
+                name.textContent = column;
+                item.appendChild(name);
+                for (const [direction, offset] of [['Up', -1], ['Down', 1]]) {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'secondary outline';
+                    button.textContent = direction;
+                    button.setAttribute('aria-label', `Move ${column} ${direction.toLowerCase()}`);
+                    button.disabled = catalogLoading || !preferencesLoaded || index + offset < 0 || index + offset >= columns.length;
+                    button.addEventListener('click', () => {
+                        if (catalogLoading || !preferencesLoaded || level !== activeTableLevel || requestId !== catalogRequestId) return;
+                        const order = BrightSitesColumnPreferences.orderedColumns(columnCatalog.groups.flatMap(g => g.columns), orderByLevel[level]);
+                        const source = order.indexOf(column), target = order.indexOf(columns[index + offset]);
+                        [order[source], order[target]] = [order[target], order[source]];
+                        orderByLevel[level] = order;
+                        saveColumnSelection();
+                        const buttons = host.querySelectorAll('button');
+                        const focusIndex = (index + offset) * 2 + (offset === -1 ? 0 : 1);
+                        if (buttons[focusIndex]) buttons[focusIndex].focus();
+                    });
+                    item.appendChild(button);
+                }
+                host.appendChild(item);
+            });
         }
 
         function syncColumnCheckboxes() {
@@ -531,7 +645,7 @@
         }
 
         function setSelection(selectedNames) {
-            if (catalogLoading) return;
+            if (catalogLoading || !preferencesLoaded) return;
             const all = columnCatalog.groups.flatMap(g => g.columns);
             deselectedColumns = new Set(all.filter(c => !selectedNames.includes(c)));
             hiddenByLevel[activeTableLevel] = deselectedColumns;
@@ -544,14 +658,24 @@
             const requestId = ++catalogRequestId;
             catalogLoading = true;
             document.getElementById('columnGroups').innerHTML = '';
+            document.getElementById('columnOrder').innerHTML = '';
+            document.getElementById('splitPairs').disabled = true;
             for (const id of ['colsAll', 'colsNone', 'colsCore']) document.getElementById(id).disabled = true;
+            await preferencesReady;
+            if (!preferencesLoaded) return;
             try {
                 const res = await fetch(`/api/columns?reportLevel=${level}`);
-                if (!res.ok) return;
+                if (!res.ok) throw new Error('Could not load report columns. Please retry.');
                 const catalog = await res.json();
                 if (level !== activeTableLevel || requestId !== catalogRequestId) return;
                 columnCatalog = catalog;
-            } catch (err) { console.error('loadColumnPicker', err); return; }
+            } catch (err) {
+                if (level !== activeTableLevel || requestId !== catalogRequestId) return;
+                console.error('loadColumnPicker', err);
+                preferenceStatus.textContent = err.message;
+                retryPreferences.hidden = false;
+                return;
+            }
             const host = document.getElementById('columnGroups');
             host.innerHTML = '';
             columnCatalog.groups.forEach(group => {
@@ -576,10 +700,28 @@
                 host.appendChild(fs);
             });
             catalogLoading = false;
+            document.getElementById('splitPairs').disabled = false;
             for (const id of ['colsAll', 'colsNone', 'colsCore']) document.getElementById(id).disabled = false;
             syncColumnCheckboxes();
-            saveColumnSelection();
+            updateColumnDisplay();
         }
+        retryPreferences.addEventListener('click', async () => {
+            if (!preferencesLoaded) await loadAccountPreferences();
+            if (preferencesLoaded) {
+                await loadColumnPicker();
+                if (catalogLoading) return;
+                if (accountPreferences && preferenceSync.hasPending()) {
+                    await preferenceSync.retry();
+                } else {
+                    preferenceStatus.textContent = accountPreferences ? 'Column changes save automatically to your account.'
+                        : 'Column defaults are saved only in this browser. Sign in with a company account to sync.';
+                    retryPreferences.hidden = true;
+                }
+            }
+        });
+        window.addEventListener('beforeunload', event => {
+            if (preferenceSync.hasPending()) { event.preventDefault(); event.returnValue = ''; }
+        });
         document.getElementById('colsAll').addEventListener('click', () => setSelection(columnCatalog.groups.flatMap(g => g.columns)));
         document.getElementById('colsNone').addEventListener('click', () => setSelection([]));
         document.getElementById('colsCore').addEventListener('click', () => setSelection(columnCatalog.core));
@@ -588,7 +730,8 @@
             result = result.tables ? result.tables[activeTableLevel] : result;
             const useDanielle = document.getElementById('danielleFormat').checked;
             if (!useDanielle) return BrightSitesReportView.buildTableView(result, {
-                deselectedColumns: [...deselectedColumns], splitPairs: document.getElementById('splitPairs').checked
+                deselectedColumns: [...deselectedColumns], splitPairs: document.getElementById('splitPairs').checked,
+                columnOrder: orderByLevel[activeTableLevel]
             });
 
             const sourceIndexByName = {};
@@ -617,7 +760,7 @@
                 try {
                     const selections = {};
                     for (const level of ['order', 'shipment']) selections[level] = {
-                        columns: fullResult.tables[level].columns.filter(c => !hiddenByLevel[level].has(c)),
+                        columns: selectedColumns(fullResult.tables[level].columns, level),
                         splitPairs: Boolean(splitByLevel[level])
                     };
                     const res = await fetch(`/api/run/${completedJobId}/workbook`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selections }) });
@@ -700,8 +843,9 @@
         ['danielleFormat', 'splitPairs'].forEach(id => {
             document.getElementById(id).addEventListener('change', () => {
                 if (id === 'splitPairs') {
+                    if (!preferencesLoaded || catalogLoading) return;
                     splitByLevel[activeTableLevel] = document.getElementById(id).checked;
-                    try { localStorage.setItem('brightsites_split_pairs_v1', JSON.stringify(splitByLevel)); } catch (e) { /* ignore */ }
+                    saveColumnSelection();
                 }
                 if (fullResult) renderPreview(fullResult);
             });
@@ -711,10 +855,10 @@
             const saved = localStorage.getItem('brightsites_report_level_v1');
             if (['shipment', 'order', 'both'].includes(saved)) document.getElementById('reportLevel').value = saved;
         } catch (e) { /* defaults */ }
+        const preferencesReady = loadAccountPreferences();
         changeReportLevel();
         setJobControlState();
 
-        // Column configuration removed; always show all columns returned by the server.
     </script>
 </body>
 

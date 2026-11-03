@@ -64,7 +64,8 @@ async function exportReportWorkbook({ tables, selections = {} }) {
     for (const level of ['order', 'shipment']) {
       const table = tables[level];
       const selected = validateSelection(selections[level], table);
-      viewSettings[level] = { deselectedColumns: table.columns.filter(c => !selected.columns.includes(c)), splitPairs: selected.splitPairs };
+      viewSettings[level] = { deselectedColumns: table.columns.filter(c => !selected.columns.includes(c)),
+        columnOrder: selected.columns, splitPairs: selected.splitPairs };
       const width = getTableViewColumns(table, viewSettings[level]).length + (level === 'order' ? 3 : 2);
       if (width > 16384) throw badRequest('The report has too many columns for Excel. Select fewer columns.');
       cellCount += (table.rows.length + 1) * width;

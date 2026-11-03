@@ -36,6 +36,21 @@ test('mandatory relationship columns survive empty selections and dynamic splitt
   assert.deepEqual(workbook.getWorksheet('Order Level').getRow(1).values.slice(1), ['Order Key', 'View Shipments', 'Shipment Detail Rows']);
   assert.deepEqual(workbook.getWorksheet('Shipment Level').getRow(1).values.slice(1), ['Order Key', 'Product Option: Finish', 'Product Option: Late Key', 'View Order']);
 });
+test('workbook selection order matches preview order while retaining required navigation columns', async () => {
+  const workbook = await read(await exportReportWorkbook({ tables: tables(), selections: {
+    order: { columns: ['Order Total', 'Order #'] },
+    shipment: { columns: ['Product Options', 'Original Quantity', 'Order #'], splitPairs: true },
+  } }));
+  const order = workbook.getWorksheet('Order Level'), shipment = workbook.getWorksheet('Shipment Level');
+  assert.deepEqual(order.getRow(1).values.slice(1), ['Order Key', 'Order Total', 'Order #', 'View Shipments', 'Shipment Detail Rows']);
+  assert.equal(order.getCell('B2').value, 125);
+  assert.equal(order.getCell('C2').value, '00100');
+  assert.deepEqual(shipment.getRow(1).values.slice(1), ['Order Key', 'Product Option: Finish', 'Product Option: Late Key',
+    'Original Quantity', 'Order #', 'View Order']);
+  assert.equal(shipment.getCell('B2').value, 'Matte');
+  assert.equal(shipment.getCell('D2').value, 3);
+  assert.equal(shipment.getCell('E2').value, '00100');
+});
 test('duplicate parents, orphan details and invalid selection settings reject export', async () => {
   let input = tables(); input.order.rowKeys[1] = input.order.rowKeys[0];
   await assert.rejects(exportReportWorkbook({ tables: input }), /duplicate/i);

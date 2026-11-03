@@ -26,11 +26,11 @@ Set `AUTH_MODE=email` to replace the shared password with emailed one-time codes
 
 The app stays at https://ftg-billing-e2fcc1ef48a1.herokuapp.com/login. No custom website domain is needed. Supabase manages email-code verification and users; Resend provides SMTP delivery.
 
-1. Create a separate Supabase project in the **Centricity** organization on the Free plan. No application database tables are needed.
+1. Create a separate Supabase project in the **Centricity** organization on the Free plan. Account column defaults also require the table described below.
 2. Create a Resend account and verify a sender domain you control using the DNS records Resend provides. This is email-sender verification only, not a website DNS change. Choose a verified From address, and create a sending-only Resend API key.
 3. In Supabase **Authentication → Email / SMTP settings**, enable custom SMTP: host `smtp.resend.com`, port `465`, username `resend`, and the Resend API key as the SMTP password. Set the sender email to your verified From address. Do not rely on Supabase's default email delivery: it is restricted and unsuitable for general production sign-ins.
 4. Enable the Email provider and allow new user sign-ups. In **Email Templates → Magic Link**, include the literal `{{ .Token }}` in the email body so users receive a code rather than a link. Set email OTP expiry to **600 seconds**, retain the resend cooldown, and configure Supabase email/verification rate limits for expected usage. Configure CAPTCHA or an Auth hook if needed to protect the public Supabase OTP endpoint from abuse; the app's rate limits apply only to requests through this server.
-5. Set Supabase's Site URL to `https://ftg-billing-e2fcc1ef48a1.herokuapp.com`. Obtain the project URL and **publishable key** (a legacy `anon` key also works). Never use a secret/service-role key for this integration.
+5. Set Supabase's Site URL to `https://ftg-billing-e2fcc1ef48a1.herokuapp.com`. Obtain the project URL and **publishable key** (a legacy `anon` key also works). Authentication uses the publishable key; the separate server-only secret below is used only for account preferences.
 6. Configure the app through secure Heroku settings (or an untracked local `.env`):
 
    ```text
@@ -132,7 +132,21 @@ UPS enrichment is enabled by default in Shipment Level and Both mode, and applie
 
 ## Choosing columns
 
-Use **Choose report columns** in the UI to pick which fields appear in the active table's preview and download (saved separately for each level in your browser; "Core columns" restores that level's core set). Excel always retains the relationship/navigation columns. Extra fields include order sales tax, shipping tax, discounts, customer email, payment method/status, in-hands date, product/internal IDs, tax code, base/options price, logo charges and line-item notes. Tax and shipping come from BrightSites `tax_price`, `shipment.cost` and `required_adjustments`.
+Use **Choose report columns** to select fields, then the up/down buttons under **Arrange selected columns** to set their order. Selection, order and split settings save automatically to your signed-in account, separately for Order Level and Shipment Level. They are restored on another browser or device after sign-in. New accounts start with all columns; existing browser-only selections are not imported. "Core columns" restores the active level's core set.
+
+The save indicator confirms when changes reach your account. If saving fails, use **Retry** before leaving the page; unsaved changes are retained for retry while the page remains open. If loading fails, retry before editing columns or running a report. Shared-password/local development mode keeps browser-local preferences instead of account storage.
+
+Preview, CSV and Excel use the same selected-column order. Split personalization/option fields follow their parent field's position. Excel always retains its mandatory Order Key and relationship/navigation columns. Danielle's Format keeps its fixed schema. Extra fields include order sales tax, shipping tax, discounts, customer email, payment method/status, in-hands date, product/internal IDs, tax code, base/options price, logo charges and line-item notes. Tax and shipping come from BrightSites `tax_price`, `shipment.cost` and `required_adjustments`.
+
+### Account preference storage setup
+
+Before deploying account defaults:
+
+1. Execute [the migration](supabase/migrations/20261103000000_report_column_preferences.sql) once in the same Supabase project's SQL Editor. It creates `report_column_preferences`, enables row-level security, and denies direct browser access.
+2. In **Project Settings → API Keys → Secret keys**, obtain a server secret (`sb_secret_...`; a legacy `service_role` key also works).
+3. Set `SUPABASE_SECRET_KEY` in the ignored local `.env` and secure Heroku config, alongside `SUPABASE_URL`. Never commit this privileged key, expose it in browser JavaScript, or use it as the authentication publishable key. Restart the server after configuring it.
+
+Preferences are keyed by the verified company email from the app session, not a client-supplied identity. `GET /api/preferences/columns` loads both layouts; `PUT /api/preferences/columns/:level` saves a validated layout for `order` or `shipment`. Missing storage configuration or failed database requests produce explicit load/save errors rather than silently reverting to browser storage.
 
 ## Known issues / next session
 

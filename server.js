@@ -14,6 +14,8 @@ const { createAuth } = require('./middleware/auth');
 const { createEmailAuth } = require('./middleware/emailAuth');
 const { createEmailAuthProvider } = require('./lib/emailAuth');
 const { getAuthConfig } = require('./config/auth');
+const { createPreferenceRoutes } = require('./routes/preferenceRoutes');
+const { createColumnPreferenceService } = require('./services/columnPreferenceService');
 const { securityHeaders, requireHttps } = require('./middleware/security');
 
 const isProduction = process.env.NODE_ENV === 'production';
@@ -47,6 +49,10 @@ if (authEnabled) {
   app.use(auth.requireAuth);
 }
 app.use(express.json({ limit: '5mb' }));
+app.use('/api', createPreferenceRoutes(createColumnPreferenceService({
+  url: process.env.SUPABASE_URL,
+  key: process.env.SUPABASE_SECRET_KEY,
+})));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api', reportRoutes);
 app.use('/api', storeRoutes);

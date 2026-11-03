@@ -15,6 +15,8 @@ function buildView(result, split, deselected = []) {
   const context = vm.createContext({
     document: { getElementById: (id) => ({ checked: id === 'splitPairs' && split }) },
     deselectedColumns: new Set(deselected),
+    orderByLevel: { shipment: [] },
+    activeTableLevel: 'shipment',
     BrightSitesReportView: require('../public/reportView'),
   });
   vm.runInContext(html.slice(start, end), context);
