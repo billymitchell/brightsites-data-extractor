@@ -5,7 +5,7 @@ function securityHeaders(isProduction) {
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'");
     if (isProduction) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
-    if (req.path.startsWith('/api') || req.path === '/login') res.setHeader('Cache-Control', 'no-store');
+    if (req.path.startsWith('/api') || req.path.startsWith('/login')) res.setHeader('Cache-Control', 'no-store');
     next();
   };
 }

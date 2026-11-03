@@ -16,7 +16,40 @@ Express and vanilla JavaScript application that fetches BrightSites orders and e
 
 Locally the server listens on `127.0.0.1` (override with `HOST`). On Heroku (or `NODE_ENV=production`) it listens on `0.0.0.0:$PORT`.
 
-## Deploying to Heroku (password protected)
+## Authentication and Heroku deployment
+
+The current password login remains the default (`AUTH_MODE=password`) until company email sign-in is configured. Production refuses to start without the required authentication configuration and redirects HTTP to HTTPS.
+
+### Company email sign-in (Supabase Auth + Resend)
+
+Set `AUTH_MODE=email` to replace the shared password with emailed one-time codes. Only verified addresses on the exact `centricitynow.com` domain are accepted; subdomains and lookalike domains are rejected. There is no password fallback in email mode, and existing shared-password cookies do not grant access.
+
+The app stays at https://ftg-billing-e2fcc1ef48a1.herokuapp.com/login. No custom website domain is needed. Supabase manages email-code verification and users; Resend provides SMTP delivery.
+
+1. Create a separate Supabase project in the **Centricity** organization on the Free plan. No application database tables are needed.
+2. Create a Resend account and verify a sender domain you control using the DNS records Resend provides. This is email-sender verification only, not a website DNS change. Choose a verified From address, and create a sending-only Resend API key.
+3. In Supabase **Authentication → Email / SMTP settings**, enable custom SMTP: host `smtp.resend.com`, port `465`, username `resend`, and the Resend API key as the SMTP password. Set the sender email to your verified From address. Do not rely on Supabase's default email delivery: it is restricted and unsuitable for general production sign-ins.
+4. Enable the Email provider and allow new user sign-ups. In **Email Templates → Magic Link**, include the literal `{{ .Token }}` in the email body so users receive a code rather than a link. Set email OTP expiry to **600 seconds**, retain the resend cooldown, and configure Supabase email/verification rate limits for expected usage. Configure CAPTCHA or an Auth hook if needed to protect the public Supabase OTP endpoint from abuse; the app's rate limits apply only to requests through this server.
+5. Set Supabase's Site URL to `https://ftg-billing-e2fcc1ef48a1.herokuapp.com`. Obtain the project URL and **publishable key** (a legacy `anon` key also works). Never use a secret/service-role key for this integration.
+6. Configure the app through secure Heroku settings (or an untracked local `.env`):
+
+   ```text
+   AUTH_MODE=email
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_PUBLISHABLE_KEY=your-project-publishable-key
+   SESSION_SECRET=a-random-secret-at-least-32-characters
+   SESSION_TTL_MS=28800000
+   ```
+
+   Generate `SESSION_SECRET` locally with `openssl rand -hex 32`. Keep credentials out of source control and chat. Once configured, restart/deploy and verify a real company inbox can receive a code, complete sign-in, access reports, and sign out. Also verify a non-company email is rejected. Do not enable email mode before SMTP and templates are ready.
+
+Codes are checked server-side with Supabase; the returned access token is used to fetch the authenticated user and confirm the email before access is granted. Supabase access/refresh tokens are not stored in the browser or localStorage. The app creates its own signed HttpOnly, SameSite=Strict session cookie (Secure in production), lasting 8 hours by default. Sign-out clears local cookies; deleting or disabling a Supabase user does not revoke an already-issued app cookie until it expires. Rotate `SESSION_SECRET` to invalidate all app sessions immediately.
+
+Code-request cookies expire after 10 minutes. Each 15-minute window allows 3 code sends and 5 verification attempts per email, with additional IP limits of 20 sends and 50 verification attempts so colleagues can share an office connection. These bounded limits live in memory and reset on process restart; use a single dyno and Supabase's provider-side limits. Invalid/expired codes and email-service outages are shown explicitly rather than bypassing authentication.
+
+Free-tier limits may change. At implementation, Supabase Free included 50,000 monthly active users and could pause after a week of inactivity; Resend Free included 3,000 emails/month, capped at 100/day. Check [Supabase pricing](https://supabase.com/pricing) and [Resend pricing](https://resend.com/pricing) before rollout.
+
+### Shared password (existing deployment)
 
 ```sh
 heroku config:set NODE_ENV=production \
@@ -26,7 +59,7 @@ heroku config:set NODE_ENV=production \
 ```
 
 - Every page and `/api` route requires sign-in; sessions are signed HttpOnly cookies (default 8h, `SESSION_TTL_MS`). Logins are throttled to 5 failures per 15 minutes per IP.
-- In production the app refuses to start without `APP_PASSWORD` and `SESSION_SECRET`, and redirects HTTP to HTTPS.
+- With `AUTH_MODE=password`, production requires `APP_PASSWORD` and `SESSION_SECRET`.
 - Heroku's filesystem is ephemeral: `data/usage.json` and `server.log` reset on restart, and in-memory report jobs are lost if the dyno restarts. Use a single dyno.
 - A shared password is simple but not per-user; rotate it when a teammate leaves.
 

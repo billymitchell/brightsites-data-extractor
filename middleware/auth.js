@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const express = require('express');
+const { safeEqual, parseCookies, sameOrigin } = require('./authHelpers');
 
 const COOKIE = 'bs_session';
 const MAX_FAILS = 5;
@@ -7,21 +8,6 @@ const WINDOW_MS = 15 * 60 * 1000;
 
 function sha(v) { return crypto.createHash('sha256').update(String(v)).digest(); }
 function hmac(secret, v) { return crypto.createHmac('sha256', secret).update(v).digest('hex'); }
-
-function safeEqual(a, b) {
-  const x = Buffer.from(String(a));
-  const y = Buffer.from(String(b));
-  return x.length === y.length && crypto.timingSafeEqual(x, y);
-}
-
-function parseCookies(header) {
-  const out = {};
-  String(header || '').split(';').forEach((p) => {
-    const i = p.indexOf('=');
-    if (i > 0) out[p.slice(0, i).trim()] = p.slice(i + 1).trim();
-  });
-  return out;
-}
 
 function createAuth({ password, secret, ttlMs = 8 * 3600 * 1000, secure = false, now = () => Date.now() }) {
   const fails = new Map();
@@ -39,17 +25,6 @@ function createAuth({ password, secret, ttlMs = 8 * 3600 * 1000, secure = false,
   const isAuthed = (req) => valid(parseCookies(req.headers.cookie)[COOKIE]);
 
   const cookieAttrs = `Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`;
-
-  function sameOrigin(req) {
-    const site = req.headers['sec-fetch-site'];
-    if (site === 'same-origin' || site === 'none') return true;
-    const origin = req.headers.origin;
-    if (!origin) return true;
-    try { return new URL(origin).host === req.headers.host; } catch (e) {
-      console.warn('Origin check failed: origin=%s host=%s site=%s', origin, req.headers.host, site);
-      return false;
-    }
-  }
 
   function throttled(ip) {
     const e = fails.get(ip);

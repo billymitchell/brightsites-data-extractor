@@ -11,15 +11,21 @@ const diagnosticsRoutes = require('./routes/diagnosticsRoutes');
 const { requestTracker } = require('./services/diagnostics');
 const { logError, logInfo } = require('./utils/logger');
 const { createAuth } = require('./middleware/auth');
+const { createEmailAuth } = require('./middleware/emailAuth');
+const { createEmailAuthProvider } = require('./lib/emailAuth');
+const { getAuthConfig } = require('./config/auth');
 const { securityHeaders, requireHttps } = require('./middleware/security');
 
 const isProduction = process.env.NODE_ENV === 'production';
-const authEnabled = Boolean(process.env.APP_PASSWORD && process.env.SESSION_SECRET);
+let authConfig;
+try {
+  authConfig = getAuthConfig();
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+const authEnabled = authConfig.enabled;
 if (!authEnabled) {
-  if (isProduction) {
-    console.error('APP_PASSWORD and SESSION_SECRET are required in production.');
-    process.exit(1);
-  }
   console.warn('WARNING: APP_PASSWORD/SESSION_SECRET not set; authentication is disabled (local dev only).');
 }
 
@@ -31,12 +37,12 @@ app.use(requestTracker);
 if (isProduction) app.use(requireHttps);
 app.use('/vendor', express.static(path.join(__dirname, 'public', 'vendor')));
 if (authEnabled) {
-  const auth = createAuth({
-    password: process.env.APP_PASSWORD,
-    secret: process.env.SESSION_SECRET,
-    ttlMs: Number(process.env.SESSION_TTL_MS) || undefined,
-    secure: isProduction
-  });
+  const auth = authConfig.mode === 'email'
+    ? createEmailAuth({
+      ...authConfig,
+      provider: createEmailAuthProvider({ url: authConfig.supabaseUrl, key: authConfig.supabaseKey }),
+    })
+    : createAuth(authConfig);
   app.use(auth.router);
   app.use(auth.requireAuth);
 }
