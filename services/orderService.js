@@ -4,7 +4,7 @@ const { normalizeReportLevel } = require('../config/report');
 const { getConfiguredStores } = require('../config/stores');
 const { logWarn } = require('../utils/logger');
 const { throwIfCanceled } = require('../utils/cancel');
-const { zonedTimeToUtc } = require('../utils/timezone');
+const { dayStartUtc, dayEndUtc } = require('../utils/timezone');
 
 function createHttpError(statusCode, message) {
   const err = new Error(message);
@@ -126,14 +126,8 @@ function validateRunRequest(body = {}) {
 
   // Date-only values are whole business days in REPORT_TIMEZONE, not UTC days.
   const parseBoundary = (value, endOfDay) => {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
-    if (!m) return new Date(value);
-    const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
-    const check = new Date(Date.UTC(year, month - 1, day));
-    if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return new Date(NaN);
-    return zonedTimeToUtc(endOfDay
-      ? { year, month, day, hour: 23, minute: 59, second: 59, ms: 999 }
-      : { year, month, day });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return new Date(value);
+    return endOfDay ? dayEndUtc(value) : dayStartUtc(value);
   };
   const startDate = parseBoundary(body.start, false);
   const endDate = parseBoundary(body.end, true);
@@ -197,7 +191,16 @@ async function getRunContext(body = {}, options = {}) {
   };
 }
 
+// Fetches every order for one store created within [startDate, endDate] (Date instants).
+async function fetchOrdersInRange({ storeKey, store, startDate, endDate, statuses = [] }, options = {}) {
+  const storeOpts = { subdomain: store.subdomain, token: store.token, storeKey };
+  const params = { created_at_from: startDate.toISOString(), created_at_to: endDate.toISOString() };
+  const orders = await fetchOrders(params, statuses, storeOpts, { ...options, reportLevel: 'order' });
+  return { orders: deduplicateOrders(orders), storeOpts };
+}
+
 module.exports = {
+  fetchOrdersInRange,
   getRunContext,
   validateRunRequest,
 };

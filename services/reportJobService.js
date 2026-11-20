@@ -7,6 +7,7 @@ const { createCanceledError, isCanceledError } = require('../utils/cancel');
 const { logError, logInfo } = require('../utils/logger');
 
 const ups = require('../lib/ups');
+const presets = require('./presets');
 
 const jobs = new Map();
 const HISTORY_LIMIT = 50;
@@ -23,6 +24,7 @@ function recordHistory(job) {
     end: job.request.end,
     statusFilter: job.request.status,
     reportLevel: job.request.reportLevel,
+    preset: job.request.preset || null,
     rowCounts: job.result && job.result.meta.rowCounts,
     createdAt: job.createdAt,
     durationSec: Number.isNaN(ended - started) ? null : Math.round((ended - started) / 100) / 10,
@@ -115,6 +117,29 @@ function finalizeCanceledJob(job, message) {
   recordHistory(job);
 }
 
+function completeJob(job, result) {
+  const { meta } = result;
+  job.result = result;
+  job.status = 'completed';
+  job.completedAt = nowIso();
+  evictOldestCompletedResults();
+  job.progress = createProgress({
+    phase: 'completed',
+    ordersProcessed: meta.orders,
+    ordersTotal: meta.orders,
+    rowsBuilt: meta.rows,
+    message: `Report ready. ${meta.rows} rows built from ${meta.orders} orders.`,
+  });
+  recordHistory(job);
+  logInfo('services/reportJobService.runJob', `Completed report job ${job.id}`, {
+    jobId: job.id,
+    storeKey: job.request.storeKey,
+    preset: job.request.preset,
+    orders: meta.orders,
+    rows: meta.rows,
+  });
+}
+
 async function runJob(job) {
   if (!job || job.status === 'canceled') return;
 
@@ -131,6 +156,17 @@ async function runJob(job) {
   });
 
   try {
+    if (job.request.preset) {
+      const result = await presets.runPreset(job.request, {
+        isCanceled: () => job.cancelRequested,
+        onProgress: (progress) => updateJobProgress(job, progress),
+        maxRows: MAX_REPORT_ROWS,
+      });
+      if (job.cancelRequested) throw createCanceledError();
+      completeJob(job, result);
+      return;
+    }
+
     const context = await getRunContext(job.request, {
       isCanceled: () => job.cancelRequested,
       onProgress: (progress) => updateJobProgress(job, progress),
@@ -166,27 +202,9 @@ async function runJob(job) {
       rowCounts, reportLevel: job.request.reportLevel };
     if (upsInfo) meta.ups = upsInfo;
     if (report.debugInfo) meta.debug = report.debugInfo;
-    job.result = job.request.reportLevel === 'both'
+    completeJob(job, job.request.reportLevel === 'both'
       ? { tables: report.tables, meta }
-      : { ...report.tables[job.request.reportLevel], meta };
-    job.status = 'completed';
-    job.completedAt = nowIso();
-    evictOldestCompletedResults();
-    job.progress = createProgress({
-      phase: 'completed',
-      ordersProcessed: context.orders.length,
-      ordersTotal: context.orders.length,
-      rowsBuilt: meta.rows,
-      message: `Report ready. ${meta.rows} rows built from ${context.orders.length} orders.`,
-    });
-
-    recordHistory(job);
-    logInfo('services/reportJobService.runJob', `Completed report job ${job.id}`, {
-      jobId: job.id,
-      storeKey: job.request.storeKey,
-      orders: meta.orders,
-      rows: meta.rows,
-    });
+      : { ...report.tables[job.request.reportLevel], meta });
   } catch (err) {
     if (isCanceledError(err) || job.cancelRequested) {
       finalizeCanceledJob(job, 'Report job canceled.');
@@ -214,8 +232,10 @@ async function runJob(job) {
 }
 
 function createJob(body = {}) {
-  const { reportLevel } = validateRunRequest(body);
-  const includeUps = reportLevel !== 'order' && body.includeUps !== false;
+  // Preset formats choose their own stores and ranges, and never use UPS.
+  const presetRequest = body.preset ? presets.validatePresetRequest(body) : null;
+  const { reportLevel } = presetRequest ? { reportLevel: 'preset' } : validateRunRequest(body);
+  const includeUps = !presetRequest && reportLevel !== 'order' && body.includeUps !== false;
   // Reject before any billable BrightSites requests are made, rather than failing after enrichment.
   if (includeUps && !ups.isConfigured()) {
     const err = new Error('UPS lookup is not set up on this server (UPS_CLIENT_ID / UPS_CLIENT_SECRET missing).');
@@ -234,7 +254,7 @@ function createJob(body = {}) {
   const job = {
     id: randomUUID(),
     status: 'queued',
-    request: {
+    request: presetRequest ? { ...presetRequest, storeKey: null, reportLevel, status: '', includeUps: false } : {
       storeKey: body.storeKey,
       reportLevel,
       start: body.start,

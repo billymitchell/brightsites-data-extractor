@@ -4,8 +4,9 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
-function harness(preferences = { account: false }) {
+function harness(preferences = { account: false }, presets = []) {
   const elements = new Map();
+  const created = [];
   const requests = [];
   const saved = new Map();
   class Element {
@@ -22,12 +23,17 @@ function harness(preferences = { account: false }) {
       if (!elements.has(id)) elements.set(id, new Element());
       return elements.get(id);
     },
-    createElement: () => new Element(), createTextNode: s => ({textContent:s}), querySelectorAll: () => [], body: new Element(),
+    createElement: () => { const el = new Element(); created.push(el); return el; },
+    createTextNode: s => ({textContent:s}), body: new Element(),
+    querySelectorAll: sel => (sel.includes('reportFormat') ? created.filter(el => el.name === 'reportFormat') : []),
+    querySelector: sel => (sel.includes('reportFormat') ? created.find(el => el.name === 'reportFormat' && el.checked) || null : null),
   };
   document.getElementById('reportLevel').value = 'shipment';
   const fetch = async (url, opts) => {
     requests.push({ url, opts });
-    const json = url === '/api/preferences/columns' ? preferences
+    if (url.startsWith('/api/run') && opts && opts.method === 'POST') return { ok: true, status: 202, json: async () => ({ id: 'job-1', status: 'queued' }) };
+    const json = url === '/api/presets' ? presets
+      : url === '/api/preferences/columns' ? preferences
       : url.startsWith('/api/columns') ? { core: ['Order #'], groups: [{ label: 'Order', columns: ['Order #', 'SKU'] }] } : [];
     return { ok: true, status: 200, json: async () => json };
   };
@@ -40,7 +46,7 @@ function harness(preferences = { account: false }) {
   });
   const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
   vm.runInContext(script, context);
-  return { document, requests, saved, context };
+  return { document, requests, saved, context, created };
 }
 test('table-type controls enforce supported formats and clear stale results', async () => {
   const { document, context } = harness();
@@ -167,4 +173,25 @@ test('retry clears a catalog load error only after the catalog loads successfull
   assert.equal(document.getElementById('retryPreferences').hidden, true);
   assert.equal(document.getElementById('colsAll').disabled, false);
   assert.match(document.getElementById('preferenceStatus').textContent, /save automatically/);
+});
+
+test('choosing a preset format locks custom controls and runs the preset by id', async () => {
+  const presets = [{ id: 'product-store-report', title: 'Product Store Report', description: 'd', rangeHelp: 'r', available: true,
+    stores: [{ role: 'product', roleLabel: 'Product (Brand) Store', required: true, storeKey: 'shop', storeLabel: 'Shop' }] }];
+  const { document, requests, created, saved } = harness({ account: false }, presets);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const radio = created.find(el => el.name === 'reportFormat' && el.value === 'product-store-report');
+  assert.ok(radio, 'preset radio rendered');
+  radio.checked = true;
+  radio.events.change();
+  assert.equal(document.getElementById('storeSelect').disabled, true);
+  assert.equal(document.getElementById('columnPicker').hidden, true);
+  assert.equal(document.getElementById('presetHelp').hidden, false);
+  assert.equal(document.getElementById('download').textContent, 'Download Excel');
+  assert.equal(saved.get('brightsites_report_format_v1'), 'product-store-report');
+  document.getElementById('start').value = '2026-11-02';
+  document.getElementById('end').value = '2026-11-08';
+  await document.getElementById('run').events.click();
+  const run = requests.find(r => r.url === '/api/run');
+  assert.deepEqual(JSON.parse(run.opts.body), { preset: 'product-store-report', start: '2026-11-02', end: '2026-11-08' });
 });

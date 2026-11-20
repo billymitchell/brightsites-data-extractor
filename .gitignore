@@ -7,3 +7,6 @@ data/usage.json
 server.log
 
 .superpowers/
+
+# Client template workbooks contain customer data; never commit them.
+Preset Fromats Templeate Examples/

@@ -46,4 +46,43 @@ function zonedTimeToUtc({ year, month, day, hour = 0, minute = 0, second = 0, ms
   return new Date(guess - offsetMs(approx, timeZone));
 }
 
-module.exports = { REPORT_TIMEZONE, resolveTimezone, zonedParts, zonedTimeToUtc };
+const pad = n => String(n).padStart(2, '0');
+
+// Parses 'YYYY-MM-DD' into calendar parts, or null when it is not a real calendar date.
+function parseDateOnly(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+  if (!m) return null;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const check = new Date(Date.UTC(year, month - 1, day));
+  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return null;
+  return { year, month, day };
+}
+
+// First and last instant of a business day in the report timezone.
+function dayStartUtc(dateOnly, timeZone = REPORT_TIMEZONE) {
+  const p = parseDateOnly(dateOnly);
+  return p ? zonedTimeToUtc(p, timeZone) : new Date(NaN);
+}
+function dayEndUtc(dateOnly, timeZone = REPORT_TIMEZONE) {
+  const p = parseDateOnly(dateOnly);
+  return p ? zonedTimeToUtc({ ...p, hour: 23, minute: 59, second: 59, ms: 999 }, timeZone) : new Date(NaN);
+}
+
+// Calendar date ('YYYY-MM-DD') of a timestamp or date-only value in the report timezone.
+function zonedDateString(value, timeZone = REPORT_TIMEZONE) {
+  if (value == null || value === '') return '';
+  if (parseDateOnly(value)) return String(value);
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = zonedParts(d, timeZone);
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
+}
+
+function addDays(dateOnly, days) {
+  const p = parseDateOnly(dateOnly);
+  const d = new Date(Date.UTC(p.year, p.month - 1, p.day + days));
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+module.exports = { REPORT_TIMEZONE, resolveTimezone, zonedParts, zonedTimeToUtc, parseDateOnly,
+  dayStartUtc, dayEndUtc, zonedDateString, addDays };

@@ -2,6 +2,7 @@ const express = require('express');
 
 const { createJob, getJob, getJobResult, cancelJob } = require('../services/reportJobService');
 const { exportReportWorkbook } = require('../services/workbookExportService');
+const { renderPresetWorkbook } = require('../services/presets');
 const { logError, logWarn } = require('../utils/logger');
 
 const router = express.Router();
@@ -84,6 +85,31 @@ router.post('/run/:jobId/workbook', async (req, res) => {
       return res.status(500).json({ error: 'The Excel workbook could not be built. Please try again.' });
     }
     return res.status(err.statusCode).json({ error: err.message });
+  }
+});
+
+// Renders a preset's workbook from the stored result: no BrightSites requests are made.
+let presetExporting = false;
+router.post('/run/:jobId/preset-workbook', async (req, res) => {
+  const payload = getJobResult(req.params.jobId);
+  if (!payload) return res.status(404).json({ error: 'Report job not found.' });
+  const { job, result } = payload;
+  if (job.status === 'failed') return res.status(500).json({ error: job.error || 'Report job failed.' });
+  if (job.status !== 'completed') return res.status(409).json({ error: 'Report is not available for download.' });
+  if (!result) return res.status(410).json({ error: 'Report result has expired. Run the report again.' });
+  if (!result.preset || !Array.isArray(result.sheets)) return res.status(400).json({ error: 'This report was not run with a preset format.' });
+  if (presetExporting) return res.status(429).json({ error: 'Another Excel export is running. Try again shortly.' });
+  presetExporting = true;
+  try {
+    const { buffer, filename } = await renderPresetWorkbook(result);
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.set('Content-Disposition', `attachment; filename="${filename.replace(/["\\\r\n]/g, '')}"`);
+    return res.send(buffer);
+  } catch (err) {
+    logError('routes/reportRoutes.presetWorkbook', err, { jobId: req.params.jobId });
+    return res.status(500).json({ error: 'The Excel workbook could not be built. Please try again.' });
+  } finally {
+    presetExporting = false;
   }
 });
 

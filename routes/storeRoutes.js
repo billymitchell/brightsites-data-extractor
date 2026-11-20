@@ -4,6 +4,7 @@ const { getConfiguredStores } = require('../config/stores');
 
 const { getReportColumnConfig } = require('../config/report');
 const { UPS_COLUMNS } = require('../lib/ups');
+const { listPresets } = require('../services/presets');
 
 const router = express.Router();
 
@@ -26,6 +27,10 @@ router.get('/columns', (req, res) => {
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
+});
+
+router.get('/presets', (req, res) => {
+  res.json(listPresets());
 });
 
 module.exports = router;

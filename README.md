@@ -69,12 +69,12 @@ For multiple stores, set `BRIGHTSITES_STORES` to a JSON object keyed by store ke
 
 ```json
 {
-  "shop-a": { "subdomain": "shop-a", "token": "API_TOKEN", "label": "Shop A" },
-  "shop-b": { "subdomain": "shop-b", "token": "API_TOKEN", "label": "Shop B" }
+  "shop-a": { "subdomain": "shop-a", "token": "API_TOKEN", "label": "Shop A", "role": "product" },
+  "shop-b": { "subdomain": "shop-b", "token": "API_TOKEN", "label": "Shop B", "role": "redemption" }
 }
 ```
 
-The legacy single-store variables remain supported. Keep credentials in `.env`; do not commit it.
+`role` is optional and only used by the report formats (see below). The legacy single-store variables remain supported. Keep credentials in `.env`; do not commit it.
 
 Use a plain store key (like `shop-a`) and put the API token in `token`. Store keys are shown in the browser, logs and support reports, so a store keyed by its own token exposes that token; the server prints a warning at startup when it sees this.
 
@@ -93,6 +93,33 @@ Use a plain store key (like `shop-a`) and put the API token in `token`. Store ke
 - Job records expire after four hours by default (`REPORT_JOB_TTL_MS`); cleanup runs every ten minutes (`REPORT_JOB_CLEANUP_INTERVAL_MS`).
 - Jobs and report results are held in memory and are lost when the server restarts.
 - Usage counts are stored in `data/usage.json`, keyed by store key. The running process keeps counts in memory and saves them every few seconds and on shutdown. Older entries keyed by API tokens are ignored by `/api/usage`. There is no reset endpoint; edit the file while the server is stopped if a correction is needed.
+
+## Report formats (presets)
+
+Under **Report format** pick **Custom report** (the tables above) or one of the FTG preset formats. A preset chooses its own stores, columns, date ranges and calculations, so the store, table type, status filter and column controls are locked while one is selected. Run it with a start and end date, preview each sheet, then **Download Excel**. The file is named after the format and the run date, for example `Summary Report 11092026.xlsx`.
+
+| Format | Stores | Dates used | Sheets |
+| --- | --- | --- | --- |
+| Product Store Report | Product | Orders placed from start to end | One row per line item, plus an **Order Type** column and live totals: total sales, corporate orders, net sales, needs review and canceled |
+| Redemption Store Report | Redemption | Orders placed from start to end | One row per award, plus **Award Type**, **Award Level** and **Redemption Code** columns, with award counts by type and level |
+| Summary Report | Product + Redemption | The start-to-end week, and year to date (Jan 1 of the end year to the end date) | Weekly and YTD award counts with totals; Brand Store sales less corporate orders (subtracted once); inventory input cells; a **Corporate Orders** sheet listing every corporate and needs-review order with the reason |
+| Weekly FTG Tracking Reports | Redemption + Product + VLR (optional) | Year to date | Awards Redeemed YTD, and orders placed plus shipment tracking for each store |
+
+**Store roles.** Presets find stores by role. Add `"role": "product"`, `"redemption"` or `"vlr"` to an entry in `BRIGHTSITES_STORES`. Without one, a store whose label or subdomain contains "redemption", "vlr" or "shop" is recognised. A format is unavailable when a required store has no match. The VLR store is optional: when it is missing, its sheets are empty and a warning is shown.
+
+**Corporate orders.** An order is **Corporate** when its payment method is "Purchase Order" AND its payment note mentions "FTG Accounting" (FTG Support enters "Attn: FTG Accounting"). Only Corporate orders are deducted. An order that matches only part of the rule, or that was placed with an @forbestravelguide.com email, is marked **Needs review**: it is listed with the reason but not deducted. The billing company is not used, because it can be wrong.
+
+**Tracking sheets** list shipments whose ship date is in the year so far. They include orders placed up to `PRESET_TRACKING_LOOKBACK_DAYS` (default 120) days before January 1, so an order placed in December that ships in January is still listed.
+
+**Totals are live Excel formulas** (for example `SUMIFS` over the Order Type and status columns), so they stay correct when rows are filtered or corrected by hand. Canceled orders are always excluded from totals.
+
+**Not available from the API.** The template's **MOAS Approver/Denier** column is left blank. Inventory counts are typed into the yellow cells on the Summary sheet.
+
+**Caching.** Full order details are cached in memory by store and order id, and a cached copy is used only while the order's `updated_at` is unchanged. Running the Summary Report and then the Weekly FTG Tracking Reports only fetches the order lists again, not every order. The cache holds up to `ORDER_CACHE_MAX_ENTRIES` orders (default 5000) for `ORDER_CACHE_TTL_MS` (default 24 hours). It is lost on restart, and `ORDER_CACHE=off` turns it off. Order data is never written to disk: storing customer data needs approval first. Downloads are built from the finished job result and make no API calls.
+
+Year-to-date formats load every order placed this year (over a thousand by November 2026), so the first run after a restart takes a few minutes and makes that many API requests.
+
+API clients can run a format with `POST /api/run` and the body `{ "preset": "summary-report", "start": "2026-11-02", "end": "2026-11-08" }`. List the formats with `GET /api/presets`. Download with `POST /api/run/:jobId/preset-workbook`.
 
 ## Linked Excel reports
 

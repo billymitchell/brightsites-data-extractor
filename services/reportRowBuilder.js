@@ -1,6 +1,6 @@
 const { getReportColumnConfig, normalizeReportLevel } = require('../config/report');
 const { buildOrderReportEntry } = require('./orderRowBuilder');
-const { loadOrder, loadLineItems, loadShipments } = require('../lib/brightSites');
+const { loadEnrichedOrder } = require('./orderEnrichment');
 const { promisePool } = require('../utils/async');
 const {
   formatDateMDY,
@@ -11,7 +11,7 @@ const { pickFirstValue } = require('../utils/fields');
 const { logWarn } = require('../utils/logger');
 const { throwIfCanceled } = require('../utils/cancel');
 
-const { aggregateShipmentLineItems, buildStructuredContactFields, extractOrderAmounts, buildRowDetails, toMoney, makeOrderKey, deduplicateOrders, orderLookupId } = require('./reportFields');
+const { aggregateShipmentLineItems, buildStructuredContactFields, extractOrderAmounts, buildRowDetails, toMoney, makeOrderKey, deduplicateOrders } = require('./reportFields');
 
 function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLanded, shipMethod, shipDate, shippedQty }) {
   const structured = buildStructuredContactFields(order);
@@ -148,14 +148,8 @@ async function buildReportTables({ orders, storeOpts, debugInfo, onProgress, isC
     orders,
     async (order) => {
       throwIfCanceled(isCanceled, 'Report job canceled while enriching orders.');
-      const orderIdentifier = orderLookupId(order);
-      const [fullOrder, lineItems, shipments] = await Promise.all([
-        // A failed lookup must fail the report; treating it as empty silently drops rows.
-        loadOrder(orderIdentifier, Object.assign({}, storeOpts, { isCanceled, failOnError: true })),
-        loadLineItems(orderIdentifier, Object.assign({}, storeOpts, { isCanceled, failOnError: true })),
-        loadShipments(orderIdentifier, Object.assign({}, storeOpts, { isCanceled, failOnError: true })),
-      ]);
-      const mergedOrder = Object.assign({}, order, fullOrder || {});
+      // One request per order (line items and shipments are embedded), reused from the cache when unchanged.
+      const entry = await loadEnrichedOrder(order, storeOpts, { isCanceled });
       ordersProcessed += 1;
       if (typeof onProgress === 'function') {
         onProgress({
@@ -165,7 +159,7 @@ async function buildReportTables({ orders, storeOpts, debugInfo, onProgress, isC
           message: `Loaded order details for ${ordersProcessed} of ${orders.length} orders.`,
         });
       }
-      return { order: mergedOrder, line_items: lineItems, shipments };
+      return entry;
     },
     5,
     { stopOnError: true }
