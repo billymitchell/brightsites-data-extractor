@@ -33,10 +33,11 @@
         .job-progress { margin-top: 10px !important; color: var(--pico-muted-color); font-size: .85rem; min-height: 18px; }
         .job-actions { margin-top: 1.2rem; display: flex; justify-content: center; }
         .job-actions button { width: auto; }
-        #formatGroup label { margin-bottom: .35rem; }
-        #formatGroup label small, .preset-option small { color: var(--pico-muted-color); }
-        .preset-option { display: block; }
-        .preset-option .preset-desc { display: block; margin-left: 1.9rem; font-size: .8rem; }
+        /* Radio in column 1; title, then its description, in column 2. */
+        #formatGroup label { display: grid; grid-template-columns: auto 1fr; column-gap: .6rem; align-items: start;
+            width: auto; height: auto; line-height: 1.35; margin-bottom: .75rem; cursor: pointer; }
+        #formatGroup label input { margin: .15rem 0 0; }
+        #formatGroup label small { grid-column: 2; display: block; margin-top: .15rem; font-size: .8rem; line-height: 1.4; color: var(--pico-muted-color); }
         .preset-help { font-size: .85rem; margin: .25rem 0 0; padding: .5rem .75rem; border-left: 3px solid var(--pico-primary); background: var(--pico-card-sectioning-background-color); }
         #presetTabs button { width: auto; }
         #preview td.multiline { white-space: pre-line; min-width: 14rem; }
