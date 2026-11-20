@@ -1,12 +1,17 @@
+const { zonedParts } = require('./timezone');
+
 function formatDateMDY(value) {
   if (!value) return '';
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const d = new Date(value);
+    if (!Number.isFinite(d.getTime()) || d.toISOString().slice(0, 10) !== value) return '';
+    return `${value.slice(5, 7)}/${value.slice(8, 10)}/${value.slice(0, 4)}`;
+  }
   try {
     const d = new Date(value);
     if (isNaN(d.getTime())) return '';
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const yyyy = d.getFullYear();
-    return `${mm}/${dd}/${yyyy}`;
+    const p = zonedParts(d);
+    return `${String(p.month).padStart(2, '0')}/${String(p.day).padStart(2, '0')}/${p.year}`;
   } catch (e) {
     return '';
   }
@@ -73,7 +78,88 @@ function formatProductPersonalization(pp) {
   }).filter(Boolean).join(' ; ');
 }
 
+function addPair(pairs, header, value) {
+  if (value == null || value === '') return;
+  const found = pairs.find((p) => p[0] === header);
+  if (found) found[1] += '; ' + String(value);
+  else pairs.push([header, String(value)]);
+}
+
+function addOptionPair(pairs, name, value, splitVersion) {
+  // This established Version format has four known meanings. Other option keys
+  // and unrecognized Version values retain their original names and values.
+  const parts = typeof value === 'string' ? value.split(',').map(part => part.trim()) : [];
+  if (splitVersion && String(name).trim().toLowerCase() === 'version'
+    && parts.length === 4 && parts.every(Boolean) && /^\d{4}$/.test(parts[2])) {
+    ['Product Type', 'Award Level', 'Year', 'Category'].forEach((key, index) => addPair(pairs, `Product Option: ${key}`, parts[index]));
+  } else addPair(pairs, `Product Option: ${name}`, value);
+}
+
+function extractOptionPairs(opts, { splitVersion = true } = {}) {
+  const pairs = [];
+  if (!opts) return pairs;
+  const prefix = 'Product Option: ';
+  if (typeof opts === 'string') {
+    opts.split(';').map((t) => t.trim()).filter(Boolean).forEach((part) => {
+      const i = part.indexOf(':');
+      if (i > 0) addOptionPair(pairs, part.slice(0, i).trim(), part.slice(i + 1).trim(), splitVersion);
+      else addPair(pairs, prefix + part, part);
+    });
+    return pairs;
+  }
+  if (Array.isArray(opts)) {
+    opts.forEach((o) => {
+      if (o == null) return;
+      if (typeof o === 'string') {
+        extractOptionPairs(o, { splitVersion }).forEach(([k, v]) => addPair(pairs, k, v));
+        return;
+      }
+      const name = o.option_name || o.name || o.key || '';
+      const sub = o.sub_option_name ?? o.value ?? o.sub ?? '';
+      if (name) addOptionPair(pairs, name, sub, splitVersion);
+    });
+    return pairs;
+  }
+  if (typeof opts === 'object') {
+    Object.entries(opts).forEach(([k, v]) => addOptionPair(pairs, k, v, splitVersion));
+  }
+  return pairs;
+}
+
+function extractPersonalizationPairs(pp) {
+  const pairs = [];
+  if (!pp) return pairs;
+  const prefix = 'Product Personalization: ';
+  if (typeof pp === 'string') {
+    addPair(pairs, 'Product Personalization', pp);
+    return pairs;
+  }
+  const arr = Array.isArray(pp) ? pp : (pp.personalizations || pp.product_personalizations || []);
+  if (!Array.isArray(arr)) return pairs;
+  arr.forEach((item) => {
+    if (!item) return;
+    const title = item.title || item.name || '';
+    if (Array.isArray(item.attributes)) {
+      item.attributes.forEach((a) => {
+        if (typeof a === 'string') { addPair(pairs, prefix + (title || a), a); return; }
+        const k = a.key || a.name || '';
+        const v = a.value || a.val || '';
+        const header = !k || k === title ? (title || k) : (title ? `${title}: ${k}` : k);
+        if (header) addPair(pairs, prefix + header, v);
+      });
+    }
+    if (item.price_modifier && title) {
+      const pt = item.price_modifier.modifier_type || item.price_modifier.type || '';
+      const amt = item.price_modifier.amount || item.price_modifier.value || '';
+      if (pt || amt) addPair(pairs, `${prefix}${title} Price`, `${pt}${amt}`);
+    }
+  });
+  return pairs;
+}
+
 module.exports = {
+  extractOptionPairs,
+  extractPersonalizationPairs,
   formatDateMDY,
   formatProductOptions,
   formatProductPersonalization,

@@ -1,4 +1,12 @@
 .env
 .env.example
+!.env.example
 
 /node_modules
+data/usage.json
+server.log
+
+.superpowers/
+
+# Client template workbooks contain customer data; never commit them.
+Preset Fromats Templeate Examples/

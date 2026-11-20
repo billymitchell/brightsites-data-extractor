@@ -1,14 +1,58 @@
 const { randomUUID } = require('crypto');
 
-const { ALL_COLUMNS } = require('../config/report');
+const { MAX_REPORT_ROWS } = require('../config/report');
 const { getRunContext, validateRunRequest } = require('./orderService');
-const { buildReportRows } = require('./reportRowBuilder');
+const { buildReportTables } = require('./reportRowBuilder');
 const { createCanceledError, isCanceledError } = require('../utils/cancel');
 const { logError, logInfo } = require('../utils/logger');
 
+const ups = require('../lib/ups');
+const presets = require('./presets');
+
 const jobs = new Map();
+const HISTORY_LIMIT = 50;
+const history = [];
+
+function recordHistory(job) {
+  const started = Date.parse(job.startedAt || job.createdAt);
+  const ended = Date.parse(job.completedAt);
+  history.push({
+    id: job.id,
+    status: job.status,
+    storeKey: job.request.storeKey,
+    start: job.request.start,
+    end: job.request.end,
+    statusFilter: job.request.status,
+    reportLevel: job.request.reportLevel,
+    preset: job.request.preset || null,
+    rowCounts: job.result && job.result.meta.rowCounts,
+    createdAt: job.createdAt,
+    durationSec: Number.isNaN(ended - started) ? null : Math.round((ended - started) / 100) / 10,
+    orders: job.progress && job.progress.ordersTotal,
+    rows: job.progress && job.progress.rowsBuilt,
+    error: job.error,
+  });
+  if (history.length > HISTORY_LIMIT) history.shift();
+}
+
+function getJobHistory() {
+  return history.slice();
+}
 const JOB_TTL_MS = Math.max(60000, Number(process.env.REPORT_JOB_TTL_MS || 4 * 60 * 60 * 1000));
 const CLEANUP_INTERVAL_MS = Math.max(30000, Number(process.env.REPORT_JOB_CLEANUP_INTERVAL_MS || 10 * 60 * 1000));
+const MAX_ACTIVE_JOBS = Math.max(1, Number(process.env.REPORT_JOB_MAX_ACTIVE) || 2);
+const MAX_RETAINED_RESULTS = Math.max(1, Number(process.env.REPORT_JOB_MAX_RETAINED_RESULTS) || 5);
+
+function evictOldestCompletedResults() {
+  const completed = Array.from(jobs.entries())
+    .filter(([, job]) => job.status === 'completed' && job.result)
+    .sort((a, b) => Date.parse(a[1].completedAt) - Date.parse(b[1].completedAt));
+
+  while (completed.length > MAX_RETAINED_RESULTS) {
+    const [, oldestJob] = completed.shift();
+    oldestJob.result = null;
+  }
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -44,6 +88,7 @@ function serializeJob(job) {
     request: job.request,
     progress: job.progress,
     error: job.error,
+    resultAvailable: Boolean(job.result),
     statusUrl: `/api/run/${job.id}`,
     resultUrl: `/api/run/${job.id}/result`,
     cancelUrl: `/api/run/${job.id}/cancel`,
@@ -69,6 +114,30 @@ function finalizeCanceledJob(job, message) {
     phase: 'canceled',
     message: message || 'Report job canceled.',
   });
+  recordHistory(job);
+}
+
+function completeJob(job, result) {
+  const { meta } = result;
+  job.result = result;
+  job.status = 'completed';
+  job.completedAt = nowIso();
+  evictOldestCompletedResults();
+  job.progress = createProgress({
+    phase: 'completed',
+    ordersProcessed: meta.orders,
+    ordersTotal: meta.orders,
+    rowsBuilt: meta.rows,
+    message: `Report ready. ${meta.rows} rows built from ${meta.orders} orders.`,
+  });
+  recordHistory(job);
+  logInfo('services/reportJobService.runJob', `Completed report job ${job.id}`, {
+    jobId: job.id,
+    storeKey: job.request.storeKey,
+    preset: job.request.preset,
+    orders: meta.orders,
+    rows: meta.rows,
+  });
 }
 
 async function runJob(job) {
@@ -87,6 +156,17 @@ async function runJob(job) {
   });
 
   try {
+    if (job.request.preset) {
+      const result = await presets.runPreset(job.request, {
+        isCanceled: () => job.cancelRequested,
+        onProgress: (progress) => updateJobProgress(job, progress),
+        maxRows: MAX_REPORT_ROWS,
+      });
+      if (job.cancelRequested) throw createCanceledError();
+      completeJob(job, result);
+      return;
+    }
+
     const context = await getRunContext(job.request, {
       isCanceled: () => job.cancelRequested,
       onProgress: (progress) => updateJobProgress(job, progress),
@@ -94,43 +174,37 @@ async function runJob(job) {
 
     if (job.cancelRequested) throw createCanceledError();
 
-    const report = await buildReportRows({
+    const report = await buildReportTables({
       orders: context.orders,
+      reportLevel: job.request.reportLevel,
       storeOpts: context.storeOpts,
       debugInfo: context.debugInfo,
+      maxRows: MAX_REPORT_ROWS,
       isCanceled: () => job.cancelRequested,
       onProgress: (progress) => updateJobProgress(job, progress),
     });
 
     if (job.cancelRequested) throw createCanceledError();
 
-    const meta = {
-      orders: context.orders.length,
-      rows: report.rows.length,
-    };
+    let upsInfo = null;
+    if (job.request.includeUps) {
+      if (!ups.isConfigured()) throw new Error('UPS lookup is not set up on this server (UPS_CLIENT_ID / UPS_CLIENT_SECRET missing).');
+      const shipment = report.tables.shipment;
+      upsInfo = await ups.enrichRowsWithUps(shipment.rows, shipment.columns.indexOf('Tracking #'), {
+        isCanceled: () => job.cancelRequested,
+        onProgress: (progress) => updateJobProgress(job, progress),
+      });
+      shipment.columns = shipment.columns.concat(ups.UPS_COLUMNS);
+      if (job.cancelRequested) throw createCanceledError();
+    }
+    const rowCounts = Object.fromEntries(Object.entries(report.tables).map(([level, table]) => [level, table.rows.length]));
+    const meta = { orders: context.orders.length, rows: Object.values(rowCounts).reduce((a, b) => a + b, 0),
+      rowCounts, reportLevel: job.request.reportLevel };
+    if (upsInfo) meta.ups = upsInfo;
     if (report.debugInfo) meta.debug = report.debugInfo;
-
-    job.result = {
-      columns: ALL_COLUMNS,
-      rows: report.rows,
-      meta,
-    };
-    job.status = 'completed';
-    job.completedAt = nowIso();
-    job.progress = createProgress({
-      phase: 'completed',
-      ordersProcessed: context.orders.length,
-      ordersTotal: context.orders.length,
-      rowsBuilt: report.rows.length,
-      message: `Report ready. ${report.rows.length} rows built from ${context.orders.length} orders.`,
-    });
-
-    logInfo('services/reportJobService.runJob', `Completed report job ${job.id}`, {
-      jobId: job.id,
-      storeKey: job.request.storeKey,
-      orders: meta.orders,
-      rows: meta.rows,
-    });
+    completeJob(job, job.request.reportLevel === 'both'
+      ? { tables: report.tables, meta }
+      : { ...report.tables[job.request.reportLevel], meta });
   } catch (err) {
     if (isCanceledError(err) || job.cancelRequested) {
       finalizeCanceledJob(job, 'Report job canceled.');
@@ -149,6 +223,7 @@ async function runJob(job) {
       message: 'Report job failed.',
     });
 
+    recordHistory(job);
     logError('services/reportJobService.runJob', err, {
       jobId: job.id,
       storeKey: job.request.storeKey,
@@ -157,17 +232,35 @@ async function runJob(job) {
 }
 
 function createJob(body = {}) {
-  validateRunRequest(body);
+  // Preset formats choose their own stores and ranges, and never use UPS.
+  const presetRequest = body.preset ? presets.validatePresetRequest(body) : null;
+  const { reportLevel } = presetRequest ? { reportLevel: 'preset' } : validateRunRequest(body);
+  const includeUps = !presetRequest && reportLevel !== 'order' && body.includeUps !== false;
+  // Reject before any billable BrightSites requests are made, rather than failing after enrichment.
+  if (includeUps && !ups.isConfigured()) {
+    const err = new Error('UPS lookup is not set up on this server (UPS_CLIENT_ID / UPS_CLIENT_SECRET missing).');
+    err.statusCode = 503;
+    throw err;
+  }
   cleanupExpiredJobs();
+  const activeJobs = Array.from(jobs.values())
+    .filter((job) => ['queued', 'running', 'canceling'].includes(job.status)).length;
+  if (activeJobs >= MAX_ACTIVE_JOBS) {
+    const err = new Error(`Report job limit reached. Wait for an active job to finish (maximum ${MAX_ACTIVE_JOBS}).`);
+    err.statusCode = 429;
+    throw err;
+  }
 
   const job = {
     id: randomUUID(),
     status: 'queued',
-    request: {
+    request: presetRequest ? { ...presetRequest, storeKey: null, reportLevel, status: '', includeUps: false } : {
       storeKey: body.storeKey,
+      reportLevel,
       start: body.start,
       end: body.end,
       status: body.status || '',
+      includeUps,
     },
     createdAt: nowIso(),
     startedAt: null,
@@ -197,6 +290,7 @@ function createJob(body = {}) {
         phase: 'failed',
         message: 'Report job failed.',
       });
+      recordHistory(job);
       logError('services/reportJobService.runJobUnhandled', err, {
         jobId: job.id,
         storeKey: job.request.storeKey,
@@ -262,4 +356,5 @@ module.exports = {
   getJob,
   cancelJob,
   getJobResult,
+  getJobHistory,
 };

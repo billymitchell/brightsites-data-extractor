@@ -1,4 +1,6 @@
-const { loadOrder, loadLineItems, loadShipments } = require('../lib/brightSites');
+const { getReportColumnConfig, normalizeReportLevel } = require('../config/report');
+const { buildOrderReportEntry } = require('./orderRowBuilder');
+const { loadEnrichedOrder } = require('./orderEnrichment');
 const { promisePool } = require('../utils/async');
 const {
   formatDateMDY,
@@ -9,62 +11,7 @@ const { pickFirstValue } = require('../utils/fields');
 const { logWarn } = require('../utils/logger');
 const { throwIfCanceled } = require('../utils/cancel');
 
-function aggregateShipmentLineItems(shipment) {
-  const rawObjEntries = (shipment.line_items || []).map((x) => (typeof x === 'object' ? x : { id: x }));
-  const rawIdEntries = (shipment.line_item_ids || []).map((x) => ({ id: x }));
-  const combined = rawObjEntries.concat(rawIdEntries);
-  const agg = new Map();
-
-  combined.forEach((entry) => {
-    const liId = String(entry.id || entry.line_item_id || entry.item_id || '');
-    if (!liId) return;
-    const rawQty = pickFirstValue(entry, 'quantity', 'qty', 'shipped_quantity', 'units', 'count', 'amount', 'shipped_qty');
-    const qtyNum = rawQty === '' ? null : Number(rawQty);
-    const prev = agg.get(liId) || { qtySum: 0, hasQty: false, sample: entry };
-    if (qtyNum != null && !Number.isNaN(qtyNum)) {
-      prev.qtySum += qtyNum;
-      prev.hasQty = true;
-    }
-    prev.sample = prev.sample || entry;
-    agg.set(liId, prev);
-  });
-
-  return agg;
-}
-
-function buildStructuredContactFields(order) {
-  const billingMerged = Object.assign({}, order.billing || {}, order.billing_address || {}, order.billing_contact || {});
-  const shippingMerged = Object.assign({}, order.shipping || {}, order.shipping_address || {}, order.shipping_contact || {});
-
-  const billingFirst = pickFirstValue(billingMerged, 'first_name', 'first', 'firstName', 'firstname');
-  const billingLast = pickFirstValue(billingMerged, 'last_name', 'last', 'lastName', 'lastname');
-  const shippingFirst = pickFirstValue(shippingMerged, 'first_name', 'first', 'firstName', 'firstname');
-  const shippingLast = pickFirstValue(shippingMerged, 'last_name', 'last', 'lastName', 'lastname');
-  const customerFallback = pickFirstValue(order, 'customer_name', 'customer', 'username');
-
-  return {
-    billingName: (billingFirst || billingLast) ? `${billingFirst || ''} ${billingLast || ''}`.trim() : (customerFallback || ''),
-    billingCompany: pickFirstValue(billingMerged, 'company', 'business', 'org'),
-    billingAddress1: pickFirstValue(billingMerged, 'first_address', 'address1', 'firstAddress', 'address', 'street1'),
-    billingAddress2: pickFirstValue(billingMerged, 'second_address', 'address2', 'secondAddress', 'address_line_2', 'street2'),
-    billingCity: pickFirstValue(billingMerged, 'city', 'town'),
-    billingState: pickFirstValue(billingMerged, 'state', 'province', 'region'),
-    billingZip: pickFirstValue(billingMerged, 'zip', 'postcode', 'postal_code'),
-    billingCountry: pickFirstValue(billingMerged, 'country', 'country_name'),
-    billingEmail: pickFirstValue(billingMerged, 'email', 'contact_email') || pickFirstValue(order, 'customer_email', 'customer'),
-    billingPhone: pickFirstValue(billingMerged, 'phone', 'telephone', 'contact_phone') || pickFirstValue(order, 'customer_phone'),
-    shippingName: (shippingFirst || shippingLast) ? `${shippingFirst || ''} ${shippingLast || ''}`.trim() : (customerFallback || ''),
-    shippingCompany: pickFirstValue(shippingMerged, 'company', 'business', 'org'),
-    shippingAddress1: pickFirstValue(shippingMerged, 'first_address', 'address1', 'firstAddress', 'address', 'street1'),
-    shippingAddress2: pickFirstValue(shippingMerged, 'second_address', 'address2', 'secondAddress', 'address_line_2', 'street2'),
-    shippingCity: pickFirstValue(shippingMerged, 'city', 'town'),
-    shippingState: pickFirstValue(shippingMerged, 'state', 'province', 'region'),
-    shippingZip: pickFirstValue(shippingMerged, 'zip', 'postcode', 'postal_code'),
-    shippingCountry: pickFirstValue(shippingMerged, 'country', 'country_name'),
-    shippingEmail: pickFirstValue(shippingMerged, 'email', 'contact_email') || pickFirstValue(order, 'customer_email', 'customer'),
-    shippingPhone: pickFirstValue(shippingMerged, 'phone', 'telephone', 'contact_phone') || pickFirstValue(order, 'customer_phone'),
-  };
-}
+const { aggregateShipmentLineItems, buildStructuredContactFields, extractOrderAmounts, buildRowDetails, toMoney, makeOrderKey, deduplicateOrders } = require('./reportFields');
 
 function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLanded, shipMethod, shipDate, shippedQty }) {
   const structured = buildStructuredContactFields(order);
@@ -86,6 +33,19 @@ function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLande
     'product_code',
     'code'
   );
+  const unitPrice = pickFirstValue(lineItem, 'unit_price', 'unitPrice', 'price', 'price_each');
+  const totalPrice = pickFirstValue(lineItem, 'total_price', 'totalPrice', 'line_total', 'extended_price');
+  const taxTotal = pickFirstValue(lineItem, 'tax_price', 'tax_total', 'taxTotal', 'tax_amount', 'tax');
+  const amounts = extractOrderAmounts(order);
+  const payment = order.payment || (Array.isArray(order.payments) ? order.payments[0] : null) || {};
+  const logoCharges = Array.isArray(lineItem.logos)
+    ? lineItem.logos.reduce((sum, l) => sum + toMoney(l && l.charge), 0).toFixed(2)
+    : '';
+  const orderTotal = pickFirstValue(order, 'order_total', 'orderTotal', 'grand_total', 'total');
+  const storeShippingCost = pickFirstValue(order.shipment || {}, 'cost')
+    || amounts.shipping
+    || pickFirstValue(order, 'shipping_total', 'shipping_cost', 'shipping_amount', 'shipping_price');
+  const val = (v) => (v == null ? '' : String(v));
 
   return [
     String(order.order_id || order.id || ''),
@@ -103,6 +63,11 @@ function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLande
     sku,
     productOptions,
     '',
+    unitPrice,
+    totalPrice,
+    taxTotal,
+    orderTotal,
+    storeShippingCost,
     structured.billingName,
     structured.billingCompany,
     structured.billingAddress1,
@@ -123,13 +88,50 @@ function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLande
     structured.shippingCountry,
     structured.shippingEmail,
     structured.shippingPhone,
+    pickFirstValue(order, 'item_total'),
+    val(amounts.salesTax),
+    val(amounts.shippingTax),
+    val(amounts.discounts),
+    pickFirstValue(order, 'customer_email'),
+    pickFirstValue(order, 'username'),
+    pickFirstValue(order, 'customer_id'),
+    pickFirstValue(payment.details || {}, 'method'),
+    pickFirstValue(payment, 'state'),
+    pickFirstValue(order.shipment || {}, 'in_hands_date') || pickFirstValue(order, 'in_hands_date'),
+    pickFirstValue(order, 'updated_at'),
+    pickFirstValue(lineItem, 'product_id'),
+    pickFirstValue(lineItem, 'final_internal_id'),
+    pickFirstValue(lineItem, 'tax_code'),
+    pickFirstValue(lineItem, 'product_price'),
+    pickFirstValue(lineItem, 'options_price'),
+    logoCharges,
+    pickFirstValue(lineItem, 'note'),
   ];
 }
 
-async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCanceled }) {
+async function buildReportTables({ orders, storeOpts, debugInfo, onProgress, isCanceled, maxRows = Infinity, reportLevel = 'shipment' }) {
+  normalizeReportLevel(reportLevel);
+  if (reportLevel !== 'shipment') orders = deduplicateOrders(orders);
+  const orderRows = [], orderDetails = [], orderKeys = [], rowKeys = [];
+  let currentOrderKey;
+  const checkLimit = () => {
+    if (orderRows.length + rows.length >= maxRows) throw new Error(`Report exceeds the maximum of ${maxRows} rows. Narrow the date range and try again.`);
+  };
   let currentDebugInfo = debugInfo;
   const rows = [];
+  const rowDetails = [];
   let ordersProcessed = 0;
+  const appendRow = (row, lineItem) => {
+    checkLimit();
+    rows.push(row);
+    rowKeys.push(currentOrderKey);
+    rowDetails.push(buildRowDetails(lineItem));
+  };
+
+  // Each order is one order-level row, so fail before spending billable enrichment calls.
+  if (reportLevel !== 'shipment' && orders.length > maxRows) {
+    throw new Error(`Report exceeds the maximum of ${maxRows} rows. Narrow the date range and try again.`);
+  }
 
   if (typeof onProgress === 'function') {
     onProgress({
@@ -146,13 +148,8 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
     orders,
     async (order) => {
       throwIfCanceled(isCanceled, 'Report job canceled while enriching orders.');
-      const orderIdentifier = order.id || order.order_id || order.orderNumber || order.number;
-      const [fullOrder, lineItems, shipments] = await Promise.all([
-        loadOrder(orderIdentifier, Object.assign({}, storeOpts, { isCanceled })),
-        loadLineItems(orderIdentifier, Object.assign({}, storeOpts, { isCanceled })),
-        loadShipments(orderIdentifier, Object.assign({}, storeOpts, { isCanceled })),
-      ]);
-      const mergedOrder = Object.assign({}, order, fullOrder || {});
+      // One request per order (line items and shipments are embedded), reused from the cache when unchanged.
+      const entry = await loadEnrichedOrder(order, storeOpts, { isCanceled });
       ordersProcessed += 1;
       if (typeof onProgress === 'function') {
         onProgress({
@@ -162,7 +159,7 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
           message: `Loaded order details for ${ordersProcessed} of ${orders.length} orders.`,
         });
       }
-      return { order: mergedOrder, line_items: lineItems, shipments };
+      return entry;
     },
     5,
     { stopOnError: true }
@@ -190,6 +187,15 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
       throw new Error(entry.error);
     }
     const { order, line_items = [], shipments = [] } = entry;
+    currentOrderKey = makeOrderKey(storeOpts.subdomain, order);
+    if (reportLevel !== 'shipment') {
+      checkLimit();
+      const summary = buildOrderReportEntry(entry);
+      orderRows.push(summary.row);
+      orderDetails.push(summary.rowDetails);
+      orderKeys.push(currentOrderKey);
+    }
+    if (reportLevel !== 'order') {
     const placed = formatDateMDY(order.placed_at || order.created_at);
     const liMap = new Map();
     line_items.forEach((li) => {
@@ -230,7 +236,7 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
           };
         }
 
-        rows.push(buildRow({
+        appendRow(buildRow({
           order,
           placed,
           lineItemId: liId,
@@ -240,7 +246,7 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
           shipMethod,
           shipDate,
           shippedQty: info.hasQty ? String(info.qtySum) : '',
-        }));
+        }), lineItem);
       });
     });
 
@@ -249,7 +255,7 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
       const liId = String(lineItem.id);
       if (processedLineItems.has(liId)) return;
 
-      rows.push(buildRow({
+      appendRow(buildRow({
         order,
         placed,
         lineItemId: liId,
@@ -259,8 +265,10 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
         shipMethod: '',
         shipDate: '',
         shippedQty: '',
-      }));
+      }), lineItem);
     });
+
+    }
 
     rowsBuiltFromOrders += 1;
     if (typeof onProgress === 'function') {
@@ -268,18 +276,23 @@ async function buildReportRows({ orders, storeOpts, debugInfo, onProgress, isCan
         phase: 'building-rows',
         ordersProcessed: rowsBuiltFromOrders,
         ordersTotal: enriched.length,
-        rowsBuilt: rows.length,
+        rowsBuilt: rows.length + orderRows.length,
         message: `Built rows for ${rowsBuiltFromOrders} of ${enriched.length} orders.`,
       });
     }
   });
 
-  return {
-    rows,
-    debugInfo: currentDebugInfo,
-  };
+  const tables = {};
+  if (reportLevel !== 'shipment') tables.order = { columns: getReportColumnConfig('order').columns, rows: orderRows, rowDetails: orderDetails, rowKeys: orderKeys };
+  if (reportLevel !== 'order') tables.shipment = { columns: getReportColumnConfig('shipment').columns, rows, rowDetails, rowKeys };
+  if (!currentDebugInfo && enriched.length) currentDebugInfo = { order_id: enriched[0].order.order_id || enriched[0].order.id };
+  return { tables, debugInfo: currentDebugInfo };
+}
+async function buildReportRows(options) {
+  const level = options.reportLevel || 'shipment';
+  getReportColumnConfig(level);
+  const result = await buildReportTables({ ...options, reportLevel: level });
+  return { ...result.tables[level], debugInfo: result.debugInfo };
 }
 
-module.exports = {
-  buildReportRows,
-};
+module.exports = { buildReportRows, buildReportTables, extractOrderAmounts };

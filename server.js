@@ -7,14 +7,64 @@ const { PORT } = require('./config/report');
 const reportRoutes = require('./routes/reportRoutes');
 const storeRoutes = require('./routes/storeRoutes');
 const usageRoutes = require('./routes/usageRoutes');
+const diagnosticsRoutes = require('./routes/diagnosticsRoutes');
+const { requestTracker } = require('./services/diagnostics');
 const { logError, logInfo } = require('./utils/logger');
+const { createAuth } = require('./middleware/auth');
+const { createEmailAuth } = require('./middleware/emailAuth');
+const { createEmailAuthProvider } = require('./lib/emailAuth');
+const { getAuthConfig } = require('./config/auth');
+const { createPreferenceRoutes } = require('./routes/preferenceRoutes');
+const { createColumnPreferenceService } = require('./services/columnPreferenceService');
+const { securityHeaders, requireHttps } = require('./middleware/security');
+
+const isProduction = process.env.NODE_ENV === 'production';
+let authConfig;
+try {
+  authConfig = getAuthConfig();
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+const authEnabled = authConfig.enabled;
+if (!authEnabled) {
+  console.warn('WARNING: APP_PASSWORD/SESSION_SECRET not set; authentication is disabled (local dev only).');
+}
+
+const storesUsingTokenAsKey = Object.entries(require('./config/stores').getConfiguredStores())
+  .filter(([key, store]) => key === String(store.token)).length;
+if (storesUsingTokenAsKey) {
+  console.warn(`WARNING: ${storesUsingTokenAsKey} store(s) in BRIGHTSITES_STORES use the API token as the store key. `
+    + 'Store keys are shown in the browser, logs and support reports; give each store a plain key and a separate "token".');
+}
 
 const app = express();
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use(securityHeaders(isProduction));
+app.use(requestTracker);
+if (isProduction) app.use(requireHttps);
+app.use('/vendor', express.static(path.join(__dirname, 'public', 'vendor')));
+if (authEnabled) {
+  const auth = authConfig.mode === 'email'
+    ? createEmailAuth({
+      ...authConfig,
+      provider: createEmailAuthProvider({ url: authConfig.supabaseUrl, key: authConfig.supabaseKey }),
+    })
+    : createAuth(authConfig);
+  app.use(auth.router);
+  app.use(auth.requireAuth);
+}
 app.use(express.json({ limit: '5mb' }));
+app.use('/api', createPreferenceRoutes(createColumnPreferenceService({
+  url: process.env.SUPABASE_URL,
+  key: process.env.SUPABASE_SECRET_KEY,
+})));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api', reportRoutes);
 app.use('/api', storeRoutes);
 app.use('/api', usageRoutes);
+app.use('/api', diagnosticsRoutes);
 
 process.on('unhandledRejection', (reason) => {
   logError('process.unhandledRejection', reason, {});
@@ -24,4 +74,13 @@ process.on('uncaughtException', (err) => {
   logError('process.uncaughtException', err, {});
 });
 
-app.listen(PORT, () => logInfo('server.start', `Server listening on http://localhost:${PORT}`, { port: PORT }));
+// Heroku stops dynos with SIGTERM; save batched usage counts before exiting.
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.once(signal, () => {
+    require('./lib/usage').flush();
+    process.exit(0);
+  });
+}
+
+const HOST = process.env.HOST || (isProduction || process.env.DYNO ? '0.0.0.0' : '127.0.0.1');
+app.listen(PORT, HOST, () => logInfo('server.start', `Server listening on ${HOST}:${PORT}`, { port: PORT, auth: authEnabled }));

@@ -1,223 +1,186 @@
 <!doctype html>
-<html>
+<html lang="en">
 
 <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BrightSites Exporter</title>
+    <link rel="stylesheet" href="/vendor/pico.min.css" />
     <style>
-        body {
-            font-family: system-ui, -apple-system, Arial;
-            margin: 24px;
-        }
-
-        label {
-            display: block;
-            margin-top: 8px
-        }
-
-        .controls {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap
-        }
-
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 12px
-        }
-
-        th,
-        td {
-            border: 1px solid #ddd;
-            padding: 6px;
-            font-size: 13px
-        }
-
-        th {
-            background: #f3f3f3
-        }
-
-        #preview {
-            max-height: 500px;
-            overflow: auto
-        }
-
-        #previewMeta {
-            margin-top: 12px;
-            color: #666;
-            font-size: 13px;
-        }
-
-        button {
-            padding: 8px 12px
-        }
-
-        .inline-check {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            margin-top: 0;
-        }
-
-        .job-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(15, 23, 42, 0.68);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
-            z-index: 1000;
-        }
-
-        .job-overlay[hidden] {
-            display: none;
-        }
-
-        .job-card {
-            width: min(480px, 100%);
-            background: #fff;
-            border-radius: 18px;
-            padding: 28px 24px;
-            box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
-            text-align: center;
-        }
-
-        .job-spinner {
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            border: 4px solid #dbe4f0;
-            border-top-color: #0f766e;
-            margin: 0 auto 18px;
-            animation: spin 0.9s linear infinite;
-        }
-
-        .job-card h3 {
-            margin: 0 0 10px;
-            font-size: 22px;
-        }
-
-        .job-card p {
-            margin: 0;
-        }
-
-        .job-message {
-            color: #1f2937;
-            font-size: 15px;
-        }
-
-        .job-progress {
-            margin-top: 10px !important;
-            color: #5b6472;
-            font-size: 13px;
-            min-height: 18px;
-        }
-
-        .job-actions {
-            margin-top: 18px;
-            display: flex;
-            justify-content: center;
-            gap: 12px;
-        }
-
-        .job-actions button[disabled] {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
+        :root { --pico-font-size: 95%; }
+        .app-header { margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; }
+        .app-header h1 { margin: 0; font-size: 1.6rem; }
+        .app-header a[role=button] { margin: 0; width: auto; }
+        .app-header form, .app-header button { margin: 0; width: auto; }
+        #columnGroups fieldset { margin-top: 1rem; } #columnGroups fieldset label { display: inline-block; width: 240px; margin-right: .5rem; }
+        #columnOrder li { display: flex; align-items: center; gap: .5rem; margin-bottom: .3rem; }
+        #columnOrder li span { flex: 1; }
+        #columnOrder button { width: auto; margin: 0; padding: .2rem .5rem; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0 1rem; align-items: start; }
+        .actions { display: flex; gap: .75rem; flex-wrap: wrap; }
+        .actions button { width: auto; }
+        #statusGroup { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); column-gap: 1rem; }
+        #statusGroup legend, #statusGroup small { grid-column: 1 / -1; }
+        #preview { max-height: 500px; overflow: auto; }
+        #preview table { font-size: .8rem; margin: 0; }
+        #previewMeta, #meta { color: var(--pico-muted-color); font-size: .85rem; margin: .5rem 0; }
+        .job-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, .68); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 1000; }
+        .job-overlay[hidden] { display: none; }
+        .job-card { width: min(480px, 100%); text-align: center; margin: 0; }
+        .job-spinner { width: 44px; height: 44px; border-radius: 50%; border: 4px solid var(--pico-muted-border-color); border-top-color: var(--pico-primary); margin: 0 auto 18px; animation: spin .9s linear infinite; }
+        .job-card h3 { margin-bottom: .5rem; }
+        .job-card p { margin: 0; }
+        .job-progress { margin-top: 10px !important; color: var(--pico-muted-color); font-size: .85rem; min-height: 18px; }
+        .job-actions { margin-top: 1.2rem; display: flex; justify-content: center; }
+        .job-actions button { width: auto; }
+        /* Radio in column 1; title, then its description, in column 2. */
+        #formatGroup label { display: grid; grid-template-columns: auto 1fr; column-gap: .6rem; align-items: start;
+            width: auto; height: auto; line-height: 1.35; margin-bottom: .75rem; cursor: pointer; }
+        #formatGroup label input { margin: .15rem 0 0; }
+        #formatGroup label small { grid-column: 2; display: block; margin-top: .15rem; font-size: .8rem; line-height: 1.4; color: var(--pico-muted-color); }
+        .preset-help { font-size: .85rem; margin: .25rem 0 0; padding: .5rem .75rem; border-left: 3px solid var(--pico-primary); background: var(--pico-card-sectioning-background-color); }
+        #presetTabs button { width: auto; }
+        #preview td.multiline { white-space: pre-line; min-width: 14rem; }
+        #preview td.num { text-align: right; white-space: nowrap; }
+        #preview tr.footer td { font-weight: 600; background: var(--pico-card-sectioning-background-color); }
+        #preview td.bold { font-weight: 700; }
+        #preview td.input { background: #fff2cc; color: #333; }
+        #preview table.layout td { border-bottom: none; padding: .2rem .5rem; }
+        .warnings { color: var(--pico-del-color); font-size: .85rem; margin: .25rem 0; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 
 <body>
-    <h2>BrightSites CSV Export</h2>
-    <div class="controls">
-        <div>
-            <label>Store
-                <select id="storeSelect">
-                    <option>Loading...</option>
-                </select>
-            </label>
-        </div>
-        <div>
+    <main class="container">
+        <header class="app-header">
+            <h1>BrightSites Report Export</h1>
+            <div class="actions"><a href="/api/diagnostics/report" role="button" class="outline secondary" download>Download support info</a><form method="post" action="/logout"><button type="submit" class="outline secondary">Sign out</button></form></div>
+        </header>
 
-        </div>
-        <div>
-            <label>Date Preset
-                <select id="datePreset">
-                    <option value="custom">Custom</option>
-                    <option value="last7">Last 7 days</option>
-                    <option value="last30">Last 30 days</option>
-                    <option value="yearToDate">Year to Date</option>
-                    <option value="thisMonth">This Month</option>
-                    <option value="lastMonth">Last Month</option>
-                </select>
+        <article>
+            <div class="form-grid">
+                <label>Store
+                    <select id="storeSelect"><option>Loading...</option></select>
+                </label>
+                <label>Table type
+                    <select id="reportLevel">
+                        <option value="shipment">Shipment Level</option>
+                        <option value="order">Order Level</option>
+                        <option value="both">Both tables (Excel)</option>
+                    </select>
+                </label>
+                <label>Date Preset
+                    <select id="datePreset">
+                        <option value="custom">Custom</option>
+                        <option value="last7">Last 7 days</option>
+                        <option value="last30">Last 30 days</option>
+                        <option value="yearToDate">Year to Date</option>
+                        <option value="thisMonth">This Month</option>
+                        <option value="lastMonth">Last Month</option>
+                    </select>
+                </label>
+                <label>Start (required)
+                    <input type="date" id="start" required />
+                </label>
+                <label>End (required)
+                    <input type="date" id="end" required />
+                </label>
+                
+            </div>
+            <fieldset id="formatGroup">
+                <legend>Report format</legend>
+                <label><input type="radio" name="reportFormat" value="" checked /> Custom report <small>(choose the store, table type and columns below)</small></label>
+                <div id="presetOptions"><small>Loading preset formats...</small></div>
+                <p id="presetHelp" class="preset-help" hidden></p>
+            </fieldset>
+            <fieldset id="statusGroup">
+                    <legend>Status (optional)</legend>
+                        <label><input type="checkbox" name="status" value="New" /> New</label>
+                        <label><input type="checkbox" name="status" value="Billed" /> Billed</label>
+                        <label><input type="checkbox" name="status" value="Paid" /> Paid</label>
+                        <label><input type="checkbox" name="status" value="In Progress" /> In Progress</label>
+                        <label><input type="checkbox" name="status" value="Split" /> Split</label>
+                        <label><input type="checkbox" name="status" value="Shipped" /> Shipped</label>
+                        <label><input type="checkbox" name="status" value="Completed" /> Completed</label>
+                        <label><input type="checkbox" name="status" value="Back Ordered" /> Back Ordered</label>
+                        <label><input type="checkbox" name="status" value="Canceled" /> Canceled</label>
+                        <label><input type="checkbox" name="status" value="MOAS Pending" /> MOAS Pending</label>
+                    <small>Leave all unchecked for every status.</small>
+                </fieldset>
+            <label>
+                <input type="checkbox" id="danielleFormat" role="switch" />
+                Danielle's Format <small id="danielleHelp" hidden>Available in Shipment Level.</small>
             </label>
-        </div>
+            <label>
+                <input type="checkbox" id="splitPairs" role="switch" />
+                Split Product Personalization and Product Options into one column per key (value in the cell)
+            </label>
+            <details id="columnPicker" open>
+                <summary>Choose report columns <small id="columnCount"></small></summary>
+                <div class="actions">
+                    <button type="button" class="secondary outline" id="colsAll">Select all</button>
+                    <button type="button" class="secondary outline" id="colsCore">Core columns</button>
+                    <button type="button" class="secondary outline" id="colsNone">Clear</button>
+                </div>
+                <small>Applies to the active table's preview and download. Not used with Danielle's Format.</small>
+                <p id="preferenceStatus" role="status" aria-live="polite">Loading column defaults...</p>
+                <button type="button" class="secondary outline" id="retryPreferences" hidden>Retry saving / loading defaults</button>
+                <div id="columnGroups"></div>
+                <details>
+                    <summary>Arrange selected columns</summary>
+                    <small>Move columns up or down. Split option/personalization columns follow their parent field. Excel keeps its required navigation columns.</small>
+                    <ol id="columnOrder" aria-label="Selected column order"></ol>
+                </details>
+            </details>
+            <div class="actions">
+                <button id="run">Run</button>
+                <button id="download" class="secondary" disabled>Download CSV</button>
+            </div>
+        </article>
 
-        <div>
-            <label>Status (optional)
-                <select id="statusSelect" multiple size="9">
-                    <option value="all" selected>All</option>
-                    <option value="New">New</option>
-                    <option value="Billed">Billed</option>
-                    <option value="Paid">Paid</option>
-                    <option value="In Progress">In Progress</option>
-                    <option value="Split">Split</option>
-                    <option value="Shipped">Shipped</option>
-                    <option value="Completed">Completed</option>
-                    <option value="Back Ordered">Back Ordered</option>
-                    <option value="Canceled">Canceled</option>
-                    <option value="MOAS Pending">MOAS Pending</option>
-                </select>
-                <small style="display:block;color:#666;margin-top:4px">Use Cmd/Ctrl+Click to select multiple</small>
-            </label>
-        </div>
-        <div>
-            <label>Start (required)
-                <input type="date" id="start" required />
-            </label>
-            <label>End (required)
-                <input type="date" id="end" required />
-            </label>
-        </div>
-        <div style="align-self:end">
-            <button id="run">Run</button>
-            <button id="download" disabled>Download CSV</button>
-        </div>
-        <div style="align-self:end">
-            <label class="inline-check">
-                <input type="checkbox" id="danielleFormat" />
-                Danielle's Format
-            </label>
-        </div>
-    </div>
+        <div id="meta"></div>
+        <div id="presetTabs" class="actions" hidden></div>
+        <div id="previewTabs" class="actions" hidden><button type="button" id="previewOrders" aria-pressed="true">Order Level</button><button type="button" id="previewShipments" class="outline" aria-pressed="false">Shipment Level</button></div>
+        <div id="previewMeta"></div>
+        <div id="preview"></div>
+    </main>
 
-    <div id="meta"></div>
-    <div id="previewMeta"></div>
-    <div id="preview"></div>
     <div id="jobOverlay" class="job-overlay" hidden>
-        <div class="job-card">
+        <article class="job-card" role="dialog" aria-modal="true" aria-labelledby="jobTitle">
             <div id="jobSpinner" class="job-spinner" aria-hidden="true"></div>
             <h3 id="jobTitle">Building report</h3>
             <p id="jobMessage" class="job-message">Preparing your request.</p>
             <p id="jobProgress" class="job-progress"></p>
             <div class="job-actions">
-                <button id="cancelJob" type="button">Cancel</button>
+                <button id="cancelJob" type="button" class="secondary">Cancel</button>
             </div>
-        </div>
+        </article>
     </div>
 
+    <script src="/csv.js"></script>
+    <script src="/reportView.js"></script>
+    <script src="/columnPreferences.js"></script>
     <script>
+        const _origFetch = window.fetch.bind(window);
+        window.fetch = async (...args) => {
+            const r = await _origFetch(...args);
+            if (r.status === 401) { window.location.href = '/login'; }
+            return r;
+        };
+        let clientEventsSent = 0;
+        function reportClientError(message) {
+            if (clientEventsSent++ >= 10) return;
+            _origFetch('/api/diagnostics/client-event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, page: location.pathname }) }).catch(() => {});
+        }
+        window.addEventListener('error', (e) => reportClientError(e.message));
+        window.addEventListener('unhandledrejection', (e) => reportClientError(String(e.reason)));
         // Column configuration and usage sections removed; preview uses all server-provided columns.
 
         let fullResult = null;
+        let completedJobId = null;
+        let workbookDownloading = false;
+        let activeTableLevel = 'shipment';
         let activeJobId = null;
         let activeJobPollTimer = null;
         let cancelRequested = false;
@@ -278,13 +241,22 @@
         }
 
         function setJobControlState() {
-            runButton.disabled = Boolean(activeJobId);
+            runButton.disabled = Boolean(activeJobId) || workbookDownloading;
+            document.getElementById('reportLevel').disabled = Boolean(activeJobId) || workbookDownloading;
+            document.querySelectorAll('input[name=reportFormat]').forEach(input => {
+                const preset = presetCatalog.find(p => p.id === input.value);
+                input.disabled = Boolean(activeJobId) || workbookDownloading || Boolean(preset && !preset.available);
+            });
             cancelJobButton.disabled = !activeJobId || cancelRequested;
             cancelJobButton.textContent = cancelRequested ? 'Canceling...' : 'Cancel';
         }
 
         function resetResultState() {
             fullResult = null;
+            completedJobId = null;
+            document.getElementById('previewTabs').hidden = true;
+            presetTabsEl.hidden = true;
+            presetTabsEl.innerHTML = '';
             downloadButton.disabled = true;
             previewEl.innerHTML = '';
             previewMetaEl.textContent = '';
@@ -373,9 +345,23 @@
 
             const result = await res.json();
             fullResult = result;
+            completedJobId = job.id;
+            if (result.preset) {
+                activePresetSheet = 0;
+                document.getElementById('previewTabs').hidden = true;
+                renderPresetTabs(result);
+                renderPresetPreview(result);
+                downloadButton.disabled = false;
+                describePresetResult(result);
+                setJobOverlayVisible(false);
+                completeActiveJob();
+                return;
+            }
+            document.getElementById('previewTabs').hidden = !result.tables;
+            if (result.tables) await activateTable(activeTableLevel);
             renderPreview(result);
             downloadButton.disabled = false;
-            metaEl.textContent = `Orders: ${result.meta.orders}  Rows: ${result.meta.rows}`;
+            metaEl.textContent = result.tables ? `Orders: ${result.meta.orders}  Order rows: ${result.meta.rowCounts.order}  Shipment rows: ${result.meta.rowCounts.shipment}` : `Table: ${result.meta.reportLevel === 'order' ? 'Order Level' : 'Shipment Level'}  Orders: ${result.meta.orders}  Rows: ${result.meta.rows}`;
             setJobOverlayVisible(false);
             completeActiveJob();
         }
@@ -447,9 +433,11 @@
                 start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
                 end = new Date(today.getFullYear(), today.getMonth(), 0);
             }
+            // Use the browser's calendar date; toISOString() rolls over to tomorrow in US evenings.
+            const localDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
             if (start && end) {
-                document.getElementById('start').value = start.toISOString().slice(0, 10);
-                document.getElementById('end').value = end.toISOString().slice(0, 10);
+                document.getElementById('start').value = localDate(start);
+                document.getElementById('end').value = localDate(end);
             }
         }
 
@@ -460,9 +448,35 @@
 
         runButton.addEventListener('click', async () => {
             if (activeJobId) return;
+            const preset = selectedPreset();
+            if (preset) {
+                const start = document.getElementById('start').value;
+                const end = document.getElementById('end').value;
+                if (!start || !end) { metaEl.textContent = 'Both start and end dates are required.'; return; }
+                resetResultState();
+                runButton.disabled = true;
+                metaEl.textContent = `Queueing ${preset.title}...`;
+                try {
+                    const res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ preset: preset.id, start, end }) });
+                    if (!res.ok) throw new Error(await readErrorResponse(res));
+                    const job = await res.json();
+                    activateJob(job);
+                    metaEl.textContent = 'Report queued. This screen will update while it runs.';
+                    pollJob(job.id);
+                } catch (err) {
+                    console.error(err);
+                    metaEl.textContent = 'Error: ' + err.message;
+                } finally {
+                    if (!activeJobId) setJobControlState();
+                }
+                return;
+            }
+            if (!preferencesLoaded || catalogLoading) {
+                metaEl.textContent = 'Load your column defaults before running the report. Use Retry if loading failed.';
+                return;
+            }
 
-            const statusEl = document.getElementById('statusSelect');
-            let statuses = Array.from(statusEl ? statusEl.selectedOptions : []).map(o => o.value);
+            let statuses = Array.from(document.querySelectorAll('#statusGroup input[name=status]:checked')).map(o => o.value);
 
             // If "all" is selected or nothing is selected, don't send status filter
             if (statuses.includes('all') || statuses.length === 0) {
@@ -487,6 +501,7 @@
 
             const payload = {
                 storeKey: storeKey,
+                reportLevel: document.getElementById('reportLevel').value,
                 start: start,
                 end: end
             };
@@ -510,11 +525,201 @@
             }
         });
 
+        // ----- Preset report formats -----
+        let presetCatalog = [];
+        let activePresetSheet = 0;
+        const presetOptionsEl = document.getElementById('presetOptions');
+        const presetHelpEl = document.getElementById('presetHelp');
+        const presetTabsEl = document.getElementById('presetTabs');
+
+        function selectedPresetId() {
+            const checked = document.querySelector('input[name=reportFormat]:checked');
+            return checked ? checked.value : '';
+        }
+        function selectedPreset() {
+            const id = selectedPresetId();
+            return presetCatalog.find(p => p.id === id) || null;
+        }
+        async function loadPresets() {
+            try {
+                const res = await fetch('/api/presets');
+                if (!res.ok) throw new Error(await readErrorResponse(res));
+                presetCatalog = await res.json();
+            } catch (err) {
+                console.error('loadPresets', err);
+                presetOptionsEl.innerHTML = '<small>Preset formats could not be loaded. Reload the page to try again.</small>';
+                return;
+            }
+            presetOptionsEl.innerHTML = '';
+            let saved = '';
+            try { saved = localStorage.getItem('brightsites_report_format_v1') || ''; } catch (e) { /* ignore */ }
+            presetCatalog.forEach(preset => {
+                const label = document.createElement('label');
+                label.className = 'preset-option';
+                const input = document.createElement('input');
+                input.type = 'radio';
+                input.name = 'reportFormat';
+                input.value = preset.id;
+                input.disabled = !preset.available;
+                label.appendChild(input);
+                label.appendChild(document.createTextNode(' ' + preset.title));
+                const desc = document.createElement('small');
+                desc.className = 'preset-desc';
+                const missing = preset.stores.filter(st => st.required && !st.storeKey).map(st => st.roleLabel);
+                desc.textContent = preset.available ? preset.description : `Unavailable: needs the ${missing.join(' and ')} to be configured.`;
+                label.appendChild(desc);
+                presetOptionsEl.appendChild(label);
+                if (preset.available && preset.id === saved) input.checked = true;
+            });
+            document.querySelectorAll('input[name=reportFormat]').forEach(input => input.addEventListener('change', applyFormatMode));
+            applyFormatMode();
+        }
+        function applyFormatMode() {
+            const preset = selectedPreset();
+            try { localStorage.setItem('brightsites_report_format_v1', preset ? preset.id : ''); } catch (e) { /* ignore */ }
+            const usingPreset = Boolean(preset);
+            for (const id of ['storeSelect', 'reportLevel', 'danielleFormat', 'splitPairs']) {
+                document.getElementById(id).disabled = usingPreset || (id === 'danielleFormat' && document.getElementById('reportLevel').value !== 'shipment');
+            }
+            document.querySelectorAll('#statusGroup input').forEach(cb => { cb.disabled = usingPreset; });
+            document.getElementById('statusGroup').hidden = usingPreset;
+            document.getElementById('columnPicker').hidden = usingPreset;
+            presetHelpEl.hidden = !usingPreset;
+            if (preset) {
+                const stores = preset.stores.map(st => st.storeKey ? `${st.roleLabel}: ${st.storeLabel}` : `${st.roleLabel}: not configured${st.required ? '' : ' (its sheets will be empty)'}`);
+                presetHelpEl.textContent = `${preset.rangeHelp} Stores: ${stores.join('; ')}.`;
+                downloadButton.textContent = 'Download Excel';
+            } else {
+                downloadButton.textContent = document.getElementById('reportLevel').value === 'both' ? 'Download Excel' : 'Download CSV';
+            }
+            if (fullResult && Boolean(fullResult.preset) !== usingPreset) resetResultState();
+            else if (fullResult && preset && fullResult.preset.id !== preset.id) resetResultState();
+        }
+
+        function formatPresetValue(cell, type) {
+            const value = cell && typeof cell === 'object' ? cell.v : cell;
+            const t = (cell && typeof cell === 'object' && cell.t) || type;
+            if (value === '' || value == null) return '';
+            if (t === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+                const [y, m, d] = String(value).split('-');
+                return `${m}/${d}/${y}`;
+            }
+            if ((t === 'currency' || t === 'accounting') && Number.isFinite(Number(value))) {
+                const n = Number(value);
+                if (t === 'accounting' && n === 0) return '$ -';
+                return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+            if (t === 'integer' && Number.isFinite(Number(value))) return Number(value).toLocaleString('en-US');
+            return String(value);
+        }
+        function presetCell(tr, cell, type, extraClass) {
+            const td = document.createElement('td');
+            td.textContent = formatPresetValue(cell, type);
+            const t = (cell && typeof cell === 'object' && cell.t) || type;
+            if (['currency', 'accounting', 'integer'].includes(t)) td.classList.add('num');
+            if (typeof td.textContent === 'string' && td.textContent.includes('\n')) td.classList.add('multiline');
+            if (cell && typeof cell === 'object' && cell.b) td.classList.add('bold');
+            if (cell && typeof cell === 'object' && cell.input) td.classList.add('input');
+            if (extraClass) td.classList.add(extraClass);
+            tr.appendChild(td);
+        }
+        function renderPresetTabs(result) {
+            presetTabsEl.innerHTML = '';
+            presetTabsEl.hidden = result.sheets.length < 2;
+            result.sheets.forEach((sheet, index) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = `${sheet.name} (${sheet.rows.length})`;
+                button.className = index === activePresetSheet ? '' : 'outline';
+                button.setAttribute('aria-pressed', String(index === activePresetSheet));
+                button.addEventListener('click', () => { activePresetSheet = index; renderPresetTabs(result); renderPresetPreview(result); });
+                presetTabsEl.appendChild(button);
+            });
+        }
+        function renderPresetPreview(result) {
+            const sheet = result.sheets[Math.min(activePresetSheet, result.sheets.length - 1)];
+            previewEl.innerHTML = '';
+            const table = document.createElement('table');
+            if (sheet.kind === 'layout') {
+                table.className = 'layout';
+                const tbody = document.createElement('tbody');
+                const width = Math.max(1, ...sheet.rows.map(r => (r || []).length));
+                sheet.rows.forEach(row => {
+                    const tr = document.createElement('tr');
+                    for (let i = 0; i < width; i++) presetCell(tr, (row || [])[i]);
+                    tbody.appendChild(tr);
+                });
+                table.appendChild(tbody);
+                previewMetaEl.textContent = 'Preview of the summary sheet. Yellow cells are for manual entry in Excel.';
+            } else {
+                const thead = document.createElement('thead');
+                const htr = document.createElement('tr');
+                sheet.columns.forEach(column => { const th = document.createElement('th'); th.textContent = column.header; htr.appendChild(th); });
+                thead.appendChild(htr);
+                table.appendChild(thead);
+                const tbody = document.createElement('tbody');
+                sheet.rows.slice(0, PREVIEW_ROW_LIMIT).forEach(row => {
+                    const tr = document.createElement('tr');
+                    sheet.columns.forEach((column, i) => presetCell(tr, row[i], column.type));
+                    tbody.appendChild(tr);
+                });
+                (sheet.footer || []).forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'footer';
+                    sheet.columns.forEach((column, i) => presetCell(tr, row[i], column.type));
+                    tbody.appendChild(tr);
+                });
+                table.appendChild(tbody);
+                previewMetaEl.textContent = sheet.rows.length > PREVIEW_ROW_LIMIT
+                    ? `Preview shows ${PREVIEW_ROW_LIMIT} of ${sheet.rows.length} rows plus totals. Download Excel for the full report.`
+                    : `Preview shows all ${sheet.rows.length} rows${(sheet.footer || []).length ? ' plus totals' : ''}.`;
+                if (sheet.notes && sheet.notes.length) previewMetaEl.textContent += ' ' + sheet.notes.join(' ');
+            }
+            previewEl.appendChild(table);
+        }
+        function describePresetResult(result) {
+            const m = result.meta;
+            const stores = Object.values(m.stores || {}).filter(Boolean)
+                .map(st => `${st.label}: ${st.orders} orders (${st.fromCache} from cache)`).join(' • ');
+            metaEl.innerHTML = '';
+            const line = document.createElement('div');
+            line.textContent = `${m.title} • ${m.rows} rows • ${stores}`;
+            metaEl.appendChild(line);
+            (m.warnings || []).forEach(w => { const div = document.createElement('div'); div.className = 'warnings'; div.textContent = w; metaEl.appendChild(div); });
+        }
+        async function downloadPresetWorkbook() {
+            workbookDownloading = true;
+            downloadButton.disabled = true;
+            setJobControlState();
+            try {
+                const res = await fetch(`/api/run/${completedJobId}/preset-workbook`, { method: 'POST' });
+                if (!res.ok) throw new Error(await readErrorResponse(res));
+                const blob = await res.blob();
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const match = /filename="([^"]+)"/.exec(disposition);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = match ? match[1] : 'report.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                metaEl.textContent = 'Excel download failed: ' + err.message;
+            } finally {
+                workbookDownloading = false;
+                downloadButton.disabled = false;
+                setJobControlState();
+            }
+        }
+
         function renderPreview(result) {
+            if (result.preset) return renderPresetPreview(result);
             const preview = document.getElementById('preview');
             const previewMeta = document.getElementById('previewMeta');
             preview.innerHTML = '';
-            const view = buildViewData(result);
+            const view = buildViewData(result, PREVIEW_ROW_LIMIT);
             const visible = view.columns;
             const table = document.createElement('table');
             const thead = document.createElement('thead');
@@ -524,10 +729,10 @@
             table.appendChild(thead);
             const tbody = document.createElement('tbody');
             const rows = view.rows.slice(0, PREVIEW_ROW_LIMIT);
-            if (view.rows.length > PREVIEW_ROW_LIMIT) {
-                previewMeta.textContent = `Preview is truncated. Showing ${rows.length} of ${view.rows.length} rows. Download CSV to get the full result.`;
+            if (view.totalRows > PREVIEW_ROW_LIMIT) {
+                previewMeta.textContent = `Preview is truncated. Showing ${rows.length} of ${view.totalRows} rows. Download the report to get the full result.`;
             } else {
-                previewMeta.textContent = `Preview is showing all ${view.rows.length} rows returned by the server.`;
+                previewMeta.textContent = `Preview is showing all ${view.totalRows} rows returned by the server.`;
             }
             rows.forEach(r => {
                 const tr = document.createElement('tr');
@@ -542,50 +747,303 @@
             preview.appendChild(table);
         }
 
-        function buildViewData(result) {
+        const columnStorageKeys = { shipment: 'brightsites_deselected_columns_v2', order: 'brightsites_deselected_columns_order_v1' };
+        const hiddenByLevel = { shipment: new Set(), order: new Set() };
+        const splitByLevel = { shipment: false, order: false };
+        const orderByLevel = { shipment: [], order: [] };
+        let accountPreferences = false;
+        let preferencesLoaded = false;
+        const preferenceStatus = document.getElementById('preferenceStatus');
+        const retryPreferences = document.getElementById('retryPreferences');
+        const preferenceSync = BrightSitesColumnPreferences.createPreferenceSync({
+            fetch: (...args) => fetch(...args),
+            onStatus(status, message) {
+                preferenceStatus.textContent = status === 'saving' ? 'Saving column defaults to your account...'
+                    : status === 'saved' ? 'Column defaults saved to your account.' : message;
+                retryPreferences.hidden = status !== 'error';
+            }
+        });
+        async function loadAccountPreferences() {
+            try {
+                const res = await fetch('/api/preferences/columns');
+                if (!res.ok) throw new Error('Could not load your account column defaults. Retry before changing columns.');
+                const data = await res.json();
+                if (typeof data.account !== 'boolean') throw new Error('Invalid column preferences response. Please retry.');
+                accountPreferences = data.account;
+                for (const level of ['order', 'shipment']) {
+                    if (accountPreferences) {
+                        const layout = data.layouts && data.layouts[level];
+                        hiddenByLevel[level] = new Set(layout ? layout.deselectedColumns : []);
+                        orderByLevel[level] = layout ? layout.columnOrder : [];
+                        splitByLevel[level] = Boolean(layout && layout.splitPairs);
+                    } else {
+                        hiddenByLevel[level] = new Set(JSON.parse(localStorage.getItem(columnStorageKeys[level]) || '[]'));
+                        orderByLevel[level] = JSON.parse(localStorage.getItem('brightsites_column_order_' + level) || '[]');
+                        const split = JSON.parse(localStorage.getItem('brightsites_split_pairs_v1') || '{}');
+                        splitByLevel[level] = Boolean(split[level]);
+                    }
+                }
+                preferencesLoaded = true;
+                deselectedColumns = hiddenByLevel[activeTableLevel];
+                document.getElementById('splitPairs').checked = splitByLevel[activeTableLevel];
+                preferenceStatus.textContent = accountPreferences ? 'Column changes save automatically to your account.'
+                    : 'Column defaults are saved only in this browser. Sign in with a company account to sync.';
+                retryPreferences.hidden = true;
+            } catch (err) {
+                console.error('loadAccountPreferences', err);
+                preferenceStatus.textContent = err.message;
+                retryPreferences.hidden = false;
+            }
+        }
+        let deselectedColumns = hiddenByLevel.shipment;
+        let columnCatalog = { groups: [], core: [] };
+        let catalogRequestId = 0;
+        let catalogLoading = false;
+
+        async function activateTable(level) {
+            activeTableLevel = level;
+            deselectedColumns = hiddenByLevel[level];
+            document.getElementById('splitPairs').checked = Boolean(splitByLevel[level]);
+            document.getElementById('previewOrders').setAttribute('aria-pressed', String(level === 'order'));
+            document.getElementById('previewShipments').setAttribute('aria-pressed', String(level === 'shipment'));
+            document.getElementById('previewOrders').className = level === 'order' ? '' : 'outline';
+            document.getElementById('previewShipments').className = level === 'shipment' ? '' : 'outline';
+            await loadColumnPicker();
+            if (fullResult) renderPreview(fullResult);
+        }
+        async function changeReportLevel() {
+            const mode = document.getElementById('reportLevel').value;
+            resetResultState();
+            try { localStorage.setItem('brightsites_report_level_v1', mode); } catch (e) { /* ignore */ }
+            const danielle = document.getElementById('danielleFormat');
+            danielle.disabled = mode !== 'shipment';
+            if (danielle.disabled) danielle.checked = false;
+            document.getElementById('danielleHelp').hidden = !danielle.disabled;
+            downloadButton.textContent = mode === 'both' ? 'Download Excel' : 'Download CSV';
+            metaEl.textContent = 'Choose your columns, then run a report.';
+            await activateTable(mode === 'shipment' ? 'shipment' : 'order');
+            if (selectedPreset()) applyFormatMode();
+        }
+        document.getElementById('reportLevel').addEventListener('change', changeReportLevel);
+        document.getElementById('previewOrders').addEventListener('click', () => activateTable('order'));
+        document.getElementById('previewShipments').addEventListener('click', () => activateTable('shipment'));
+
+        function saveColumnSelection() {
+            if (!preferencesLoaded || catalogLoading) return;
+            if (accountPreferences) {
+                preferenceSync.save(activeTableLevel, {
+                    deselectedColumns: [...deselectedColumns],
+                    columnOrder: [...orderByLevel[activeTableLevel]],
+                    splitPairs: Boolean(splitByLevel[activeTableLevel])
+                });
+            } else {
+                try {
+                    localStorage.setItem(columnStorageKeys[activeTableLevel], JSON.stringify([...deselectedColumns]));
+                    localStorage.setItem('brightsites_column_order_' + activeTableLevel, JSON.stringify(orderByLevel[activeTableLevel]));
+                    localStorage.setItem('brightsites_split_pairs_v1', JSON.stringify(splitByLevel));
+                } catch (err) {
+                    console.error('saveColumnSelection', err);
+                    preferenceStatus.textContent = 'Could not save column defaults in this browser.';
+                }
+            }
+            updateColumnDisplay();
+        }
+        function updateColumnDisplay() {
+            const all = columnCatalog.groups.flatMap(g => g.columns);
+            const total = all.length;
+            document.getElementById('columnCount').textContent = total ? `(${all.filter(c => !deselectedColumns.has(c)).length} of ${total} selected)` : '';
+            renderColumnOrder();
+            if (fullResult) renderPreview(fullResult);
+        }
+        function selectedColumns(columns, level) {
+            return BrightSitesColumnPreferences.orderedColumns(columns, orderByLevel[level])
+                .filter(c => !hiddenByLevel[level].has(c));
+        }
+        function renderColumnOrder() {
+            const host = document.getElementById('columnOrder');
+            host.innerHTML = '';
+            const level = activeTableLevel;
+            const requestId = catalogRequestId;
+            const columns = selectedColumns(columnCatalog.groups.flatMap(g => g.columns), level);
+            columns.forEach((column, index) => {
+                const item = document.createElement('li');
+                const name = document.createElement('span');
+                name.textContent = column;
+                item.appendChild(name);
+                for (const [direction, offset] of [['Up', -1], ['Down', 1]]) {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'secondary outline';
+                    button.textContent = direction;
+                    button.setAttribute('aria-label', `Move ${column} ${direction.toLowerCase()}`);
+                    button.disabled = catalogLoading || !preferencesLoaded || index + offset < 0 || index + offset >= columns.length;
+                    button.addEventListener('click', () => {
+                        if (catalogLoading || !preferencesLoaded || level !== activeTableLevel || requestId !== catalogRequestId) return;
+                        const order = BrightSitesColumnPreferences.orderedColumns(columnCatalog.groups.flatMap(g => g.columns), orderByLevel[level]);
+                        const source = order.indexOf(column), target = order.indexOf(columns[index + offset]);
+                        [order[source], order[target]] = [order[target], order[source]];
+                        orderByLevel[level] = order;
+                        saveColumnSelection();
+                        const buttons = host.querySelectorAll('button');
+                        const focusIndex = (index + offset) * 2 + (offset === -1 ? 0 : 1);
+                        if (buttons[focusIndex]) buttons[focusIndex].focus();
+                    });
+                    item.appendChild(button);
+                }
+                host.appendChild(item);
+            });
+        }
+
+        function syncColumnCheckboxes() {
+            document.querySelectorAll('#columnGroups input[type=checkbox]').forEach(cb => { cb.checked = !deselectedColumns.has(cb.dataset.col); });
+        }
+
+        function setSelection(selectedNames) {
+            if (catalogLoading || !preferencesLoaded) return;
+            const all = columnCatalog.groups.flatMap(g => g.columns);
+            deselectedColumns = new Set(all.filter(c => !selectedNames.includes(c)));
+            hiddenByLevel[activeTableLevel] = deselectedColumns;
+            syncColumnCheckboxes();
+            saveColumnSelection();
+        }
+
+        async function loadColumnPicker() {
+            const level = activeTableLevel;
+            const requestId = ++catalogRequestId;
+            catalogLoading = true;
+            document.getElementById('columnGroups').innerHTML = '';
+            document.getElementById('columnOrder').innerHTML = '';
+            document.getElementById('splitPairs').disabled = true;
+            for (const id of ['colsAll', 'colsNone', 'colsCore']) document.getElementById(id).disabled = true;
+            await preferencesReady;
+            if (!preferencesLoaded) return;
+            try {
+                const res = await fetch(`/api/columns?reportLevel=${level}`);
+                if (!res.ok) throw new Error('Could not load report columns. Please retry.');
+                const catalog = await res.json();
+                if (level !== activeTableLevel || requestId !== catalogRequestId) return;
+                columnCatalog = catalog;
+            } catch (err) {
+                if (level !== activeTableLevel || requestId !== catalogRequestId) return;
+                console.error('loadColumnPicker', err);
+                preferenceStatus.textContent = err.message;
+                retryPreferences.hidden = false;
+                return;
+            }
+            const host = document.getElementById('columnGroups');
+            host.innerHTML = '';
+            columnCatalog.groups.forEach(group => {
+                const fs = document.createElement('fieldset');
+                const legend = document.createElement('legend');
+                legend.textContent = group.label;
+                fs.appendChild(legend);
+                group.columns.forEach(col => {
+                    const label = document.createElement('label');
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.dataset.col = col;
+                    cb.addEventListener('change', () => {
+                        if (catalogLoading || level !== activeTableLevel || requestId !== catalogRequestId) return;
+                        if (cb.checked) deselectedColumns.delete(col); else deselectedColumns.add(col);
+                        saveColumnSelection();
+                    });
+                    label.appendChild(cb);
+                    label.appendChild(document.createTextNode(' ' + col));
+                    fs.appendChild(label);
+                });
+                host.appendChild(fs);
+            });
+            catalogLoading = false;
+            document.getElementById('splitPairs').disabled = false;
+            for (const id of ['colsAll', 'colsNone', 'colsCore']) document.getElementById(id).disabled = false;
+            syncColumnCheckboxes();
+            updateColumnDisplay();
+        }
+        retryPreferences.addEventListener('click', async () => {
+            if (!preferencesLoaded) await loadAccountPreferences();
+            if (preferencesLoaded) {
+                await loadColumnPicker();
+                if (catalogLoading) return;
+                if (accountPreferences && preferenceSync.hasPending()) {
+                    await preferenceSync.retry();
+                } else {
+                    preferenceStatus.textContent = accountPreferences ? 'Column changes save automatically to your account.'
+                        : 'Column defaults are saved only in this browser. Sign in with a company account to sync.';
+                    retryPreferences.hidden = true;
+                }
+            }
+        });
+        window.addEventListener('beforeunload', event => {
+            if (preferenceSync.hasPending()) { event.preventDefault(); event.returnValue = ''; }
+        });
+        document.getElementById('colsAll').addEventListener('click', () => setSelection(columnCatalog.groups.flatMap(g => g.columns)));
+        document.getElementById('colsNone').addEventListener('click', () => setSelection([]));
+        document.getElementById('colsCore').addEventListener('click', () => setSelection(columnCatalog.core));
+
+        function buildViewData(result, rowLimit) {
+            result = result.tables ? result.tables[activeTableLevel] : result;
             const useDanielle = document.getElementById('danielleFormat').checked;
-            if (!useDanielle) return { columns: result.columns, rows: result.rows };
+            if (!useDanielle) return BrightSitesReportView.buildTableView(result, {
+                deselectedColumns: [...deselectedColumns], splitPairs: document.getElementById('splitPairs').checked,
+                columnOrder: orderByLevel[activeTableLevel], rowLimit
+            });
 
             const sourceIndexByName = {};
             result.columns.forEach((name, idx) => { sourceIndexByName[name] = idx; });
 
-            const mappedRows = result.rows.map(r => {
-                return DANIELLE_COLUMNS.map(targetCol => {
+            const upsCols = result.columns.filter(c => c.startsWith('UPS ') || c === 'Expected Delivery Date');
+            const targetColumns = DANIELLE_COLUMNS.concat(upsCols);
+            const sourceRows = rowLimit == null ? result.rows : result.rows.slice(0, rowLimit);
+            const mappedRows = sourceRows.map(r => {
+                return targetColumns.map(targetCol => {
                     const sourceCol = DANIELLE_SOURCE_MAP[targetCol] || targetCol;
                     const sourceIdx = sourceIndexByName[sourceCol];
                     return (sourceIdx != null && sourceIdx >= 0 && r[sourceIdx] != null) ? r[sourceIdx] : '';
                 });
             });
 
-            return { columns: DANIELLE_COLUMNS, rows: mappedRows };
+            const view = { columns: targetColumns, rows: mappedRows };
+            if (rowLimit != null) view.totalRows = result.rows.length;
+            return view;
         }
 
-        function escapeCsvCell(v) {
-            if (v == null) return '';
-            const s = String(v);
-            if (s.includes(',') || s.includes('\"') || s.includes('\n') || s.includes('\r') || s.includes('"')) {
-                return '"' + s.replace(/"/g, '""') + '"';
+        downloadButton.addEventListener('click', async () => {
+            if (!fullResult || workbookDownloading) return;
+            if (fullResult.preset) return downloadPresetWorkbook();
+            let blob, filename;
+            if (fullResult.tables) {
+                workbookDownloading = true;
+                downloadButton.disabled = true;
+                setJobControlState();
+                try {
+                    const selections = {};
+                    for (const level of ['order', 'shipment']) selections[level] = {
+                        columns: selectedColumns(fullResult.tables[level].columns, level),
+                        splitPairs: Boolean(splitByLevel[level])
+                    };
+                    const res = await fetch(`/api/run/${completedJobId}/workbook`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selections }) });
+                    if (!res.ok) throw new Error(await readErrorResponse(res));
+                    blob = await res.blob();
+                    filename = 'brightsites_orders_and_shipments.xlsx';
+                } catch (err) {
+                    metaEl.textContent = 'Excel download failed: ' + err.message;
+                    return;
+                } finally {
+                    workbookDownloading = false;
+                    downloadButton.disabled = false;
+                    setJobControlState();
+                }
+            } else {
+                const view = buildViewData(fullResult);
+                const csv = [view.columns, ...view.rows].map(r => r.map(BrightSitesCsv.escapeCsvCell).join(',')).join('\n');
+                // The byte-order mark makes Excel read the file as UTF-8 (accents, ™, etc.).
+                blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+                filename = fullResult.meta.reportLevel === 'order' ? 'brightsites_orders.csv' : 'brightsites_shipments.csv';
             }
-            return s;
-        }
-
-        downloadButton.addEventListener('click', () => {
-            if (!fullResult) return;
-            const view = buildViewData(fullResult);
-            const rows = view.rows;
-            const visible = view.columns;
-            const lines = [];
-            lines.push(visible.map(escapeCsvCell).join(','));
-            rows.forEach(r => {
-                const out = visible.map((colName, idx) => idx >= 0 ? escapeCsvCell(r[idx]) : '');
-                lines.push(out.join(','));
-            });
-            const csv = lines.join('\n');
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'brightsites_export.csv';
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -641,13 +1099,26 @@
         }
         loadStores();
 
-        document.getElementById('danielleFormat').addEventListener('change', () => {
-            if (fullResult) renderPreview(fullResult);
+        ['danielleFormat', 'splitPairs'].forEach(id => {
+            document.getElementById(id).addEventListener('change', () => {
+                if (id === 'splitPairs') {
+                    if (!preferencesLoaded || catalogLoading) return;
+                    splitByLevel[activeTableLevel] = document.getElementById(id).checked;
+                    saveColumnSelection();
+                }
+                if (fullResult) renderPreview(fullResult);
+            });
         });
 
+        try {
+            const saved = localStorage.getItem('brightsites_report_level_v1');
+            if (['shipment', 'order', 'both'].includes(saved)) document.getElementById('reportLevel').value = saved;
+        } catch (e) { /* defaults */ }
+        const preferencesReady = loadAccountPreferences();
+        changeReportLevel();
+        loadPresets();
         setJobControlState();
 
-        // Column configuration removed; always show all columns returned by the server.
     </script>
 </body>
 
