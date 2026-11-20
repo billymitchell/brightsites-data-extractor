@@ -1,5 +1,5 @@
 const { fetchAllPages } = require('../lib/brightSites');
-const { deduplicateOrders } = require('./reportFields');
+const { deduplicateOrders, tagOrderStore } = require('./reportFields');
 const { normalizeReportLevel } = require('../config/report');
 const { getConfiguredStores } = require('../config/stores');
 const { logWarn } = require('../utils/logger');
@@ -104,21 +104,40 @@ async function fetchOrders(params, statuses, storeOpts, options = {}) {
   return orders;
 }
 
+// storeKeys (array or comma list) selects several stores for one consolidated report; storeKey is the single-store form.
+function parseStoreKeys(body) {
+  let keys = body.storeKeys != null ? body.storeKeys : body.storeKey;
+  if (typeof keys === 'string') keys = keys.split(',');
+  if (!Array.isArray(keys)) keys = keys == null ? [] : [keys];
+  return [...new Set(keys.map((k) => String(k == null ? '' : k).trim()).filter(Boolean))];
+}
+
 function validateRunRequest(body = {}) {
   const reportLevel = normalizeReportLevel(body.reportLevel);
   if (reportLevel === 'order' && body.includeUps === true) {
     throw createHttpError(400, 'UPS tracking is available in Shipment Level or Both tables.');
   }
-  const storeKey = body.storeKey;
   const stores = getConfiguredStores();
-  if (!storeKey) {
-    throw createHttpError(400, 'storeKey is required. Call GET /api/stores to list available stores and include storeKey in the request body.');
+  const storeKeys = parseStoreKeys(body);
+  if (!storeKeys.length) {
+    throw createHttpError(400, 'Choose at least one store: send storeKeys (or storeKey). Call GET /api/stores to list available stores.');
   }
-
+  const missing = storeKeys.filter((key) => !Object.hasOwn(stores, key));
+  if (missing.length) {
+    throw createHttpError(400, `Store ${missing.map((k) => `'${k}'`).join(', ')} not found. Available stores: ${Object.keys(stores).join(', ')}`);
+  }
+  const selectedStores = storeKeys.map((key) => {
+    const store = stores[key];
+    return {
+      storeKey: key,
+      label: store.label || store.subdomain || key,
+      subdomain: store.subdomain,
+      url: store.url || '',
+      storeOpts: { subdomain: store.subdomain, token: store.token, storeKey: key },
+    };
+  });
+  const storeKey = storeKeys[0];
   const store = stores[storeKey];
-  if (!store) {
-    throw createHttpError(400, `storeKey '${String(storeKey)}' not found. Available stores: ${Object.keys(stores).join(', ')}`);
-  }
 
   if (!body.start || !body.end) {
     throw createHttpError(400, 'Both start and end dates are required to prevent returning all data.');
@@ -138,7 +157,7 @@ function validateRunRequest(body = {}) {
     throw createHttpError(400, 'End date must be on or after the start date.');
   }
 
-  const storeOpts = { subdomain: store.subdomain, token: store.token, storeKey };
+  const storeOpts = selectedStores[0].storeOpts;
   const params = {};
   const dateFilterType = 'created_at';
   params[`${dateFilterType}_from`] = startDate.toISOString();
@@ -148,6 +167,8 @@ function validateRunRequest(body = {}) {
     store,
     reportLevel,
     storeKey,
+    storeKeys,
+    stores: selectedStores,
     storeOpts,
     params,
     statuses: parseStatuses(body.status),
@@ -155,7 +176,7 @@ function validateRunRequest(body = {}) {
 }
 
 async function getRunContext(body = {}, options = {}) {
-  const { params, statuses, storeOpts, reportLevel } = validateRunRequest(body);
+  const { params, statuses, storeOpts, reportLevel, stores } = validateRunRequest(body);
   const { onProgress, isCanceled } = options;
 
   if (typeof onProgress === 'function') {
@@ -166,7 +187,22 @@ async function getRunContext(body = {}, options = {}) {
   }
 
   throwIfCanceled(isCanceled, 'Report job canceled before fetching orders.');
-  const fetched = await fetchOrders(params, statuses, storeOpts, { ...options, reportLevel });
+  // Stores are fetched one after another so progress reads clearly and API load stays per store.
+  const fetched = [];
+  for (const [index, store] of stores.entries()) {
+    const storeProgress = typeof onProgress === 'function' && stores.length > 1
+      ? (progress) => onProgress({
+        ...progress,
+        storesProcessed: index,
+        storesTotal: stores.length,
+        currentStore: store.label,
+        message: `${store.label} (store ${index + 1} of ${stores.length}): ${progress.message || ''}`.trim(),
+      })
+      : onProgress;
+    const orders = await fetchOrders({ ...params }, statuses, store.storeOpts, { ...options, onProgress: storeProgress, reportLevel });
+    for (const order of orders) fetched.push(tagOrderStore(order, store));
+    throwIfCanceled(isCanceled, 'Report job canceled while fetching orders.');
+  }
   const orders = reportLevel === 'shipment' ? fetched : deduplicateOrders(fetched);
   throwIfCanceled(isCanceled, 'Report job canceled after fetching orders.');
 
@@ -188,6 +224,7 @@ async function getRunContext(body = {}, options = {}) {
     reportLevel,
     debugInfo,
     storeOpts,
+    stores,
   };
 }
 

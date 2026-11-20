@@ -20,6 +20,7 @@ function recordHistory(job) {
     id: job.id,
     status: job.status,
     storeKey: job.request.storeKey,
+    storeKeys: job.request.storeKeys || null,
     start: job.request.start,
     end: job.request.end,
     statusFilter: job.request.status,
@@ -199,7 +200,8 @@ async function runJob(job) {
     }
     const rowCounts = Object.fromEntries(Object.entries(report.tables).map(([level, table]) => [level, table.rows.length]));
     const meta = { orders: context.orders.length, rows: Object.values(rowCounts).reduce((a, b) => a + b, 0),
-      rowCounts, reportLevel: job.request.reportLevel };
+      rowCounts, reportLevel: job.request.reportLevel,
+      stores: (context.stores || []).map(({ storeKey, label, subdomain }) => ({ storeKey, label, subdomain })) };
     if (upsInfo) meta.ups = upsInfo;
     if (report.debugInfo) meta.debug = report.debugInfo;
     completeJob(job, job.request.reportLevel === 'both'
@@ -234,7 +236,7 @@ async function runJob(job) {
 function createJob(body = {}) {
   // Preset formats choose their own stores and ranges, and never use UPS.
   const presetRequest = body.preset ? presets.validatePresetRequest(body) : null;
-  const { reportLevel } = presetRequest ? { reportLevel: 'preset' } : validateRunRequest(body);
+  const { reportLevel, storeKeys } = presetRequest ? { reportLevel: 'preset' } : validateRunRequest(body);
   const includeUps = !presetRequest && reportLevel !== 'order' && body.includeUps !== false;
   // Reject before any billable BrightSites requests are made, rather than failing after enrichment.
   if (includeUps && !ups.isConfigured()) {
@@ -254,8 +256,9 @@ function createJob(body = {}) {
   const job = {
     id: randomUUID(),
     status: 'queued',
-    request: presetRequest ? { ...presetRequest, storeKey: null, reportLevel, status: '', includeUps: false } : {
-      storeKey: body.storeKey,
+    request: presetRequest ? { ...presetRequest, storeKey: null, storeKeys: null, reportLevel, status: '', includeUps: false } : {
+      storeKey: storeKeys[0],
+      storeKeys,
       reportLevel,
       start: body.start,
       end: body.end,

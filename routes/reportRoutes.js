@@ -16,6 +16,7 @@ router.post('/run', async (req, res) => {
       method: req.method,
       path: req.originalUrl,
       storeKey: req.body && req.body.storeKey,
+      storeKeys: req.body && req.body.storeKeys,
       start: req.body && req.body.start,
       end: req.body && req.body.end,
       status: req.body && req.body.status,

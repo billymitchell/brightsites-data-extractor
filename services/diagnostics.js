@@ -73,7 +73,7 @@ function plainSummary(d) {
   add('== RECENT REPORTS (newest last) ==');
   if (!d.jobs.length) add('(none yet)');
   d.jobs.forEach((j) => {
-    add(`- ${j.createdAt} | ${j.status.toUpperCase()} | ${j.preset ? `format: ${j.preset}` : `store: ${j.storeKey}`} | ${j.start} to ${j.end} | status filter: ${j.statusFilter || 'all'} | orders: ${j.orders ?? '-'} | rows: ${j.rows ?? '-'} | took: ${j.durationSec ?? '-'}s${j.error ? ` | ERROR: ${j.error}` : ''}`);
+    add(`- ${j.createdAt} | ${j.status.toUpperCase()} | ${j.preset ? `format: ${j.preset}` : `${(j.storeKeys || []).length > 1 ? 'stores' : 'store'}: ${(j.storeKeys || [j.storeKey]).join(', ')}`} | ${j.start} to ${j.end} | status filter: ${j.statusFilter || 'all'} | orders: ${j.orders ?? '-'} | rows: ${j.rows ?? '-'} | took: ${j.durationSec ?? '-'}s${j.error ? ` | ERROR: ${j.error}` : ''}`);
   });
   add();
   add(`== BRIGHTSITES API CALLS THIS MONTH (${d.month}) ==`);

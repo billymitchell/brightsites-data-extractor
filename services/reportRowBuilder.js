@@ -11,9 +11,9 @@ const { pickFirstValue } = require('../utils/fields');
 const { logWarn } = require('../utils/logger');
 const { throwIfCanceled } = require('../utils/cancel');
 
-const { aggregateShipmentLineItems, buildStructuredContactFields, extractOrderAmounts, buildRowDetails, toMoney, makeOrderKey, deduplicateOrders } = require('./reportFields');
+const { aggregateShipmentLineItems, buildStructuredContactFields, extractOrderAmounts, buildRowDetails, toMoney, makeOrderKey, deduplicateOrders, orderStore, storeAttributes } = require('./reportFields');
 
-function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLanded, shipMethod, shipDate, shippedQty }) {
+function buildRow({ order, store, placed, lineItemId, lineItem, tracking, shippingLanded, shipMethod, shipDate, shippedQty }) {
   const structured = buildStructuredContactFields(order);
   const productPersonalization = formatProductPersonalization(
     lineItem.product_personalizations || lineItem.personalizations || lineItem.personalization || lineItem.product_personalization
@@ -46,8 +46,11 @@ function buildRow({ order, placed, lineItemId, lineItem, tracking, shippingLande
     || amounts.shipping
     || pickFirstValue(order, 'shipping_total', 'shipping_cost', 'shipping_amount', 'shipping_price');
   const val = (v) => (v == null ? '' : String(v));
+  const storeInfo = storeAttributes(order, store);
 
   return [
+    storeInfo.name,
+    storeInfo.url,
     String(order.order_id || order.id || ''),
     placed,
     order.status || '',
@@ -149,7 +152,9 @@ async function buildReportTables({ orders, storeOpts, debugInfo, onProgress, isC
     async (order) => {
       throwIfCanceled(isCanceled, 'Report job canceled while enriching orders.');
       // One request per order (line items and shipments are embedded), reused from the cache when unchanged.
-      const entry = await loadEnrichedOrder(order, storeOpts, { isCanceled });
+      // A consolidated report mixes stores, so each order is loaded (and billed) against its own store.
+      const store = orderStore(order);
+      const entry = await loadEnrichedOrder(order, store ? store.storeOpts : storeOpts, { isCanceled });
       ordersProcessed += 1;
       if (typeof onProgress === 'function') {
         onProgress({
@@ -159,7 +164,7 @@ async function buildReportTables({ orders, storeOpts, debugInfo, onProgress, isC
           message: `Loaded order details for ${ordersProcessed} of ${orders.length} orders.`,
         });
       }
-      return entry;
+      return entry && !entry.error ? { ...entry, store } : entry;
     },
     5,
     { stopOnError: true }
@@ -186,8 +191,9 @@ async function buildReportTables({ orders, storeOpts, debugInfo, onProgress, isC
       });
       throw new Error(entry.error);
     }
-    const { order, line_items = [], shipments = [] } = entry;
-    currentOrderKey = makeOrderKey(storeOpts.subdomain, order);
+    const { order, line_items = [], shipments = [], store } = entry;
+    const subdomain = store ? store.subdomain : storeOpts && storeOpts.subdomain;
+    currentOrderKey = makeOrderKey(subdomain, order);
     if (reportLevel !== 'shipment') {
       checkLimit();
       const summary = buildOrderReportEntry(entry);
@@ -238,6 +244,7 @@ async function buildReportTables({ orders, storeOpts, debugInfo, onProgress, isC
 
         appendRow(buildRow({
           order,
+          store,
           placed,
           lineItemId: liId,
           lineItem,
@@ -257,6 +264,7 @@ async function buildReportTables({ orders, storeOpts, debugInfo, onProgress, isC
 
       appendRow(buildRow({
         order,
+        store,
         placed,
         lineItemId: liId,
         lineItem,

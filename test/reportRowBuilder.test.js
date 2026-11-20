@@ -24,10 +24,10 @@ test('builds price and tax fields in their configured report columns', async () 
   const row = rows[0];
 
   assert.equal(row.length, ALL_COLUMNS.length);
-  assert.equal(row[COLUMNS.indexOf('Unit Price')], 12.5);
-  assert.equal(row[COLUMNS.indexOf('Total Price')], 25);
-  assert.equal(row[COLUMNS.indexOf('Tax Total')], 2);
-  assert.equal(row[COLUMNS.indexOf('Order Total')], 30);
+  assert.equal(row[ALL_COLUMNS.indexOf('Unit Price')], 12.5);
+  assert.equal(row[ALL_COLUMNS.indexOf('Total Price')], 25);
+  assert.equal(row[ALL_COLUMNS.indexOf('Tax Total')], 2);
+  assert.equal(row[ALL_COLUMNS.indexOf('Order Total')], 30);
 });
 
 test('leaves absent monetary fields blank', async () => {
@@ -37,7 +37,7 @@ test('leaves absent monetary fields blank', async () => {
   const row = rows[0];
 
   for (const column of ['Unit Price', 'Total Price', 'Tax Total', 'Order Total']) {
-    assert.equal(row[COLUMNS.indexOf(column)], '', column);
+    assert.equal(row[ALL_COLUMNS.indexOf(column)], '', column);
   }
 });
 

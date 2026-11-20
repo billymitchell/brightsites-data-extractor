@@ -108,13 +108,32 @@ function orderLookupId(order) {
 function makeOrderKey(storeSubdomain, order) {
   return encodeURIComponent(storeSubdomain || 'default') + ':' + encodeURIComponent(orderLookupId(order)).replace(/\*/g, '%2A');
 }
+// Which configured store a fetched order came from, without changing the API's order object.
+const orderStores = new WeakMap();
+function tagOrderStore(order, store) {
+  if (order && typeof order === 'object') orderStores.set(order, store);
+  return order;
+}
+function orderStore(order) {
+  return (order && typeof order === 'object' && orderStores.get(order)) || null;
+}
+// Order ids are only unique within a store, so a consolidated report keys them by store too.
 function deduplicateOrders(orders) {
   const unique = new Map();
   for (const order of orders) {
-    const id = orderLookupId(order);
+    const store = orderStore(order);
+    const id = (store ? store.storeKey : '') + '\u0000' + orderLookupId(order);
     if (!unique.has(id)) unique.set(id, order);
   }
   return [...unique.values()];
 }
+// Store Name and Store URL report columns: the store's own name and address from the API, else the configured store.
+function storeAttributes(order = {}, store = null) {
+  const subdomain = store && store.subdomain;
+  return {
+    name: String(order.site_name || (store && (store.label || subdomain)) || ''),
+    url: String(order.site_url || (store && store.url) || (subdomain ? `https://${subdomain}.mybrightsites.com` : '')),
+  };
+}
 module.exports = { aggregateShipmentLineItems, buildStructuredContactFields, extractOrderAmounts,
-  buildRowDetails, toMoney, orderLookupId, makeOrderKey, deduplicateOrders };
+  buildRowDetails, toMoney, orderLookupId, makeOrderKey, deduplicateOrders, tagOrderStore, orderStore, storeAttributes };

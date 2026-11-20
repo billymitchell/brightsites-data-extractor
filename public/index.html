@@ -37,6 +37,12 @@
         #formatGroup label { display: grid; grid-template-columns: auto 1fr; column-gap: .6rem; align-items: start;
             width: auto; height: auto; line-height: 1.35; margin-bottom: .75rem; cursor: pointer; }
         #formatGroup label input { margin: .15rem 0 0; }
+        .store-field > span { display: block; margin-bottom: calc(var(--pico-spacing) * .375); }
+        .store-field small { display: block; margin: -.5rem 0 var(--pico-spacing); font-size: .8rem; color: var(--pico-muted-color); }
+        #storeSelect { margin-bottom: var(--pico-spacing); }
+        #storeSummary { display: inline-block; max-width: calc(100% - 1.5rem); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; vertical-align: bottom; }
+        #storeSelect[aria-disabled=true] summary { pointer-events: none; opacity: .5; }
+        #storeOptions li.all { border-bottom: 1px solid var(--pico-muted-border-color); }
         #formatGroup label small { grid-column: 2; display: block; margin-top: .15rem; font-size: .8rem; line-height: 1.4; color: var(--pico-muted-color); }
         .preset-help { font-size: .85rem; margin: .25rem 0 0; padding: .5rem .75rem; border-left: 3px solid var(--pico-primary); background: var(--pico-card-sectioning-background-color); }
         #presetTabs button { width: auto; }
@@ -60,9 +66,14 @@
 
         <article>
             <div class="form-grid">
-                <label>Store
-                    <select id="storeSelect"><option>Loading...</option></select>
-                </label>
+                <div class="store-field">
+                    <span id="storeLabel">Stores</span>
+                    <details class="dropdown" id="storeSelect">
+                        <summary aria-labelledby="storeLabel storeSummary"><span id="storeSummary">Loading stores...</span></summary>
+                        <ul id="storeOptions"></ul>
+                    </details>
+                    <small id="storeHelp">Choose one store, or several for one consolidated report. Each row shows its Store Name and Store URL.</small>
+                </div>
                 <label>Table type
                     <select id="reportLevel">
                         <option value="shipment">Shipment Level</option>
@@ -90,7 +101,7 @@
             </div>
             <fieldset id="formatGroup">
                 <legend>Report format</legend>
-                <label><input type="radio" name="reportFormat" value="" checked /> Custom report <small>(choose the store, table type and columns below)</small></label>
+                <label><input type="radio" name="reportFormat" value="" checked /> Custom report <small>(choose one or more stores, the table type and columns below)</small></label>
                 <div id="presetOptions"><small>Loading preset formats...</small></div>
                 <p id="presetHelp" class="preset-help" hidden></p>
             </fieldset>
@@ -485,11 +496,11 @@
 
             const start = document.getElementById('start').value;
             const end = document.getElementById('end').value;
-            const storeKey = document.getElementById('storeSelect').value;
+            const storeKeys = selectedStoreKeys();
 
             // require explicit store selection
-            if (!storeKey) {
-                metaEl.textContent = 'Please select a store before running the report.';
+            if (!storeKeys.length) {
+                metaEl.textContent = 'Please select at least one store before running the report.';
                 return;
             }
 
@@ -500,7 +511,7 @@
             }
 
             const payload = {
-                storeKey: storeKey,
+                storeKeys: storeKeys,
                 reportLevel: document.getElementById('reportLevel').value,
                 start: start,
                 end: end
@@ -578,7 +589,8 @@
             const preset = selectedPreset();
             try { localStorage.setItem('brightsites_report_format_v1', preset ? preset.id : ''); } catch (e) { /* ignore */ }
             const usingPreset = Boolean(preset);
-            for (const id of ['storeSelect', 'reportLevel', 'danielleFormat', 'splitPairs']) {
+            setStorePickerDisabled(usingPreset);
+            for (const id of ['reportLevel', 'danielleFormat', 'splitPairs']) {
                 document.getElementById(id).disabled = usingPreset || (id === 'danielleFormat' && document.getElementById('reportLevel').value !== 'shipment');
             }
             document.querySelectorAll('#statusGroup input').forEach(cb => { cb.disabled = usingPreset; });
@@ -1073,28 +1085,88 @@
             }
         });
 
-        // load stores into selector
+        // Store picker: one checkbox per store; several stores make one consolidated report.
+        const STORE_PREF_KEY = 'brightsites_selected_stores_v1';
+        let storeList = [];
+        function storeCheckboxes() {
+            return Array.from(document.querySelectorAll('#storeOptions input[name=store]'));
+        }
+        function selectedStoreKeys() {
+            return storeCheckboxes().filter(cb => cb.checked).map(cb => cb.value);
+        }
+        function updateStoreSummary() {
+            const keys = selectedStoreKeys();
+            const summary = document.getElementById('storeSummary');
+            const all = document.getElementById('storeAll');
+            if (all) {
+                all.checked = storeList.length > 0 && keys.length === storeList.length;
+                all.indeterminate = keys.length > 0 && keys.length < storeList.length;
+            }
+            const labels = storeList.filter(s => keys.includes(s.key)).map(s => s.label);
+            summary.textContent = !labels.length ? '-- select stores --'
+                : labels.length === 1 ? labels[0]
+                : labels.length === storeList.length ? `All stores (${labels.length})`
+                : `${labels.length} stores: ${labels.join(', ')}`;
+            summary.title = labels.join(', ');
+            try { localStorage.setItem(STORE_PREF_KEY, JSON.stringify(keys)); } catch (e) { /* ignore */ }
+        }
+        function onStoreSelectionChange() {
+            updateStoreSummary();
+            // A result from a different set of stores no longer matches the picker.
+            if (fullResult && !fullResult.preset) resetResultState();
+        }
+        function setStorePickerDisabled(disabled) {
+            const picker = document.getElementById('storeSelect');
+            picker.disabled = disabled;
+            picker.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+            if (disabled) picker.open = false;
+            storeCheckboxes().forEach(cb => { cb.disabled = disabled; });
+            const all = document.getElementById('storeAll');
+            if (all) all.disabled = disabled;
+        }
+        function storeOption(input, text) {
+            const li = document.createElement('li');
+            const label = document.createElement('label');
+            label.appendChild(input);
+            label.appendChild(document.createTextNode(' ' + text));
+            li.appendChild(label);
+            return li;
+        }
         async function loadStores() {
             try {
                 const res = await fetch('/api/stores');
-                const stores = await res.json();
-                const sel = document.getElementById('storeSelect');
-                sel.innerHTML = '';
-                const placeholder = document.createElement('option');
-                placeholder.value = '';
-                placeholder.textContent = '-- select a store --';
-                placeholder.disabled = true;
-                placeholder.selected = true;
-                sel.appendChild(placeholder);
-                stores.forEach(s => {
-                    const o = document.createElement('option');
-                    o.value = s.key;
-                    o.textContent = s.label + (s.subdomain ? ` (${s.subdomain})` : '');
-                    sel.appendChild(o);
+                storeList = await res.json();
+                const list = document.getElementById('storeOptions');
+                list.innerHTML = '';
+                let saved = [];
+                try { saved = JSON.parse(localStorage.getItem(STORE_PREF_KEY) || '[]'); } catch (e) { saved = []; }
+                if (storeList.length > 1) {
+                    const all = document.createElement('input');
+                    all.type = 'checkbox';
+                    all.id = 'storeAll';
+                    all.addEventListener('change', () => {
+                        storeCheckboxes().forEach(cb => { cb.checked = all.checked; });
+                        onStoreSelectionChange();
+                    });
+                    const li = storeOption(all, 'All stores');
+                    li.className = 'all';
+                    list.appendChild(li);
+                }
+                storeList.forEach(s => {
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.name = 'store';
+                    cb.value = s.key;
+                    cb.checked = Array.isArray(saved) && saved.includes(s.key);
+                    cb.addEventListener('change', onStoreSelectionChange);
+                    list.appendChild(storeOption(cb, s.label + (s.subdomain ? ` (${s.subdomain})` : '')));
                 });
-                // No usage refresh needed
+                if (storeList.length === 1) storeCheckboxes().forEach(cb => { cb.checked = true; });
+                updateStoreSummary();
+                setStorePickerDisabled(Boolean(selectedPreset()));
             } catch (err) {
                 console.error('loadStores', err);
+                document.getElementById('storeSummary').textContent = 'Stores could not be loaded';
             }
         }
         loadStores();
