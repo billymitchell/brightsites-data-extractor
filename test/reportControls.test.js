@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
-function harness(preferences = { account: false }, presets = []) {
+function harness(preferences = { account: false }, presets = [], stores = [{ key: 'test', label: 'Test', subdomain: 'shop' }]) {
   const elements = new Map();
   const created = [];
   const requests = [];
@@ -25,7 +25,8 @@ function harness(preferences = { account: false }, presets = []) {
     },
     createElement: () => { const el = new Element(); created.push(el); return el; },
     createTextNode: s => ({textContent:s}), body: new Element(),
-    querySelectorAll: sel => (sel.includes('reportFormat') ? created.filter(el => el.name === 'reportFormat') : []),
+    querySelectorAll: sel => (sel.includes('reportFormat') ? created.filter(el => el.name === 'reportFormat')
+      : sel.includes('name=store') ? created.filter(el => el.name === 'store') : []),
     querySelector: sel => (sel.includes('reportFormat') ? created.find(el => el.name === 'reportFormat' && el.checked) || null : null),
   };
   document.getElementById('reportLevel').value = 'shipment';
@@ -34,6 +35,7 @@ function harness(preferences = { account: false }, presets = []) {
     if (url.startsWith('/api/run') && opts && opts.method === 'POST') return { ok: true, status: 202, json: async () => ({ id: 'job-1', status: 'queued' }) };
     const json = url === '/api/presets' ? presets
       : url === '/api/preferences/columns' ? preferences
+      : url === '/api/stores' ? stores
       : url.startsWith('/api/columns') ? { core: ['Order #'], groups: [{ label: 'Order', columns: ['Order #', 'SKU'] }] } : [];
     return { ok: true, status: 200, json: async () => json };
   };
@@ -67,7 +69,7 @@ test('UPS enrichment no longer has an opt-in control or request flag', async () 
   assert.doesNotMatch(html, /id="includeUps"|id="upsHelp"|Add UPS tracking data/);
   const { document, requests, context } = harness();
   await vm.runInContext("activateTable('shipment')", context);
-  document.getElementById('storeSelect').value = 'test';
+  await new Promise(resolve => setTimeout(resolve, 0));
   document.getElementById('start').value = '2026-02-01';
   document.getElementById('end').value = '2026-02-02';
   await document.getElementById('run').events.click();
@@ -185,6 +187,7 @@ test('choosing a preset format locks custom controls and runs the preset by id',
   radio.checked = true;
   radio.events.change();
   assert.equal(document.getElementById('storeSelect').disabled, true);
+  assert.ok(created.filter(el => el.name === 'store').every(el => el.disabled), 'store checkboxes are locked for presets');
   assert.equal(document.getElementById('columnPicker').hidden, true);
   assert.equal(document.getElementById('presetHelp').hidden, false);
   assert.equal(document.getElementById('download').textContent, 'Download Excel');
@@ -194,4 +197,33 @@ test('choosing a preset format locks custom controls and runs the preset by id',
   await document.getElementById('run').events.click();
   const run = requests.find(r => r.url === '/api/run');
   assert.deepEqual(JSON.parse(run.opts.body), { preset: 'product-store-report', start: '2026-11-02', end: '2026-11-08' });
+});
+
+test('several stores can be chosen for one consolidated report', async () => {
+  const stores = [{ key: 'shop', label: 'FTG Shop', subdomain: 'ftg-shop' }, { key: 'redeem', label: 'FTG Redemption', subdomain: 'ftg-redemption' }, { key: 'vlr', label: 'VLR', subdomain: 'vlr' }];
+  const { document, requests, context, created, saved } = harness({ account: false }, [], stores);
+  await vm.runInContext('preferencesReady', context);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const boxes = created.filter(el => el.name === 'store');
+  assert.deepEqual(boxes.map(b => b.value), ['shop', 'redeem', 'vlr']);
+  assert.ok(boxes.every(b => !b.checked), 'nothing is preselected when there are several stores');
+  document.getElementById('start').value = '2026-02-01';
+  document.getElementById('end').value = '2026-02-02';
+  await document.getElementById('run').events.click();
+  assert.ok(!requests.some(r => r.url === '/api/run'), 'running needs a store');
+  assert.match(document.getElementById('meta').textContent, /at least one store/);
+
+  boxes[0].checked = true; boxes[0].events.change();
+  boxes[2].checked = true; boxes[2].events.change();
+  assert.equal(document.getElementById('storeSummary').textContent, '2 stores: FTG Shop, VLR');
+  assert.equal(document.getElementById('storeAll').indeterminate, true);
+  assert.equal(saved.get('brightsites_selected_stores_v1'), JSON.stringify(['shop', 'vlr']));
+  await document.getElementById('run').events.click();
+  const run = requests.find(r => r.url === '/api/run');
+  assert.deepEqual(JSON.parse(run.opts.body).storeKeys, ['shop', 'vlr']);
+
+  const all = created.find(el => el.id === 'storeAll');
+  all.checked = true; all.events.change();
+  assert.ok(boxes.every(b => b.checked));
+  assert.equal(document.getElementById('storeSummary').textContent, 'All stores (3)');
 });

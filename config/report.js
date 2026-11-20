@@ -22,8 +22,12 @@ const EXTRA_COLUMNS = [
   'Product ID', 'Internal ID', 'Tax Code', 'Base Price', 'Options Price', 'Logo Charges', 'Line Item Note',
 ];
 
-const ALL_COLUMNS = COLUMNS.concat(STRUCTURED_COLUMNS, EXTRA_COLUMNS);
+// First in every row so a consolidated multi-store report shows where each order came from.
+const STORE_COLUMNS = ['Store Name', 'Store URL'];
 
+const ALL_COLUMNS = STORE_COLUMNS.concat(COLUMNS, STRUCTURED_COLUMNS, EXTRA_COLUMNS);
+
+const STORE_GROUP = { label: 'Store', columns: STORE_COLUMNS };
 const COLUMN_GROUPS = [
   { label: 'Order', columns: ['Order #', 'Placed', 'Order Status', 'Billing Month', 'Order Updated', 'Order Total', 'Order Item Total'] },
   { label: 'Line item', columns: ['Line Item ID', 'Product Name', 'SKU', 'Product Options', 'Product Personalization', 'Original Quantity', 'Shipped Quantity', 'Product ID', 'Internal ID', 'Line Item Note'] },
@@ -41,10 +45,12 @@ function normalizeReportLevel(value = 'shipment') {
   return value;
 }
 
-const ORDER_CORE = ['Order #', 'Placed', 'Order Status', 'Order Total', 'Order Item Total',
+const SHIPMENT_CORE = ['Store Name'].concat(COLUMNS);
+const ORDER_CORE = ['Store Name', 'Order #', 'Placed', 'Order Status', 'Order Total', 'Order Item Total',
   'Store Shipping Cost', 'Customer Email', 'Unique Item Count', 'Original Quantity',
   'Shipped Quantity', 'Shipment Count', 'Tracking #'];
 const ORDER_GROUPS = [
+  STORE_GROUP,
   COLUMN_GROUPS[0],
   { label: 'Order charges', columns: ['Order Sales Tax', 'Order Shipping Sales Tax', 'Order Discounts', 'Store Shipping Cost'] },
   COLUMN_GROUPS[4], COLUMN_GROUPS[5], COLUMN_GROUPS[6],
@@ -57,7 +63,7 @@ function getReportColumnConfig(reportLevel = 'shipment') {
   if (reportLevel === 'both') throw Object.assign(new Error('Choose order or shipment for a column catalog.'), { statusCode: 400 });
   return reportLevel === 'order'
     ? { columns: ORDER_COLUMNS, core: ORDER_CORE, groups: ORDER_GROUPS }
-    : { columns: ALL_COLUMNS, core: COLUMNS, groups: COLUMN_GROUPS };
+    : { columns: ALL_COLUMNS, core: SHIPMENT_CORE, groups: [STORE_GROUP].concat(COLUMN_GROUPS) };
 }
 
 module.exports = {
@@ -72,5 +78,6 @@ module.exports = {
   COLUMNS,
   STRUCTURED_COLUMNS,
   EXTRA_COLUMNS,
+  STORE_COLUMNS,
   ALL_COLUMNS,
 };
