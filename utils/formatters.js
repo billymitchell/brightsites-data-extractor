@@ -1,3 +1,5 @@
+const { zonedParts } = require('./timezone');
+
 function formatDateMDY(value) {
   if (!value) return '';
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -8,10 +10,8 @@ function formatDateMDY(value) {
   try {
     const d = new Date(value);
     if (isNaN(d.getTime())) return '';
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const yyyy = d.getFullYear();
-    return `${mm}/${dd}/${yyyy}`;
+    const p = zonedParts(d);
+    return `${String(p.month).padStart(2, '0')}/${String(p.day).padStart(2, '0')}/${p.year}`;
   } catch (e) {
     return '';
   }

@@ -215,6 +215,13 @@ async function runJob(job) {
 
 function createJob(body = {}) {
   const { reportLevel } = validateRunRequest(body);
+  const includeUps = reportLevel !== 'order' && body.includeUps !== false;
+  // Reject before any billable BrightSites requests are made, rather than failing after enrichment.
+  if (includeUps && !ups.isConfigured()) {
+    const err = new Error('UPS lookup is not set up on this server (UPS_CLIENT_ID / UPS_CLIENT_SECRET missing).');
+    err.statusCode = 503;
+    throw err;
+  }
   cleanupExpiredJobs();
   const activeJobs = Array.from(jobs.values())
     .filter((job) => ['queued', 'running', 'canceling'].includes(job.status)).length;
@@ -233,7 +240,7 @@ function createJob(body = {}) {
       start: body.start,
       end: body.end,
       status: body.status || '',
-      includeUps: reportLevel !== 'order' && body.includeUps !== false,
+      includeUps,
     },
     createdAt: nowIso(),
     startedAt: null,

@@ -49,8 +49,12 @@ test('rejects impossible calendar dates', () => {
 test('accepts a valid report date range', () => {
   const context = validateRunRequest({ storeKey: 'test', start: '2026-02-01', end: '2026-02-02' });
   assert.equal(context.storeKey, 'test');
-  assert.equal(context.params.created_at_from, '2026-02-01T00:00:00.000Z');
-  assert.equal(context.params.created_at_to, '2026-02-02T23:59:59.999Z');
+  // Whole business days in the default REPORT_TIMEZONE (America/New_York, UTC-5 in February).
+  assert.equal(context.params.created_at_from, '2026-02-01T05:00:00.000Z');
+  assert.equal(context.params.created_at_to, '2026-02-03T04:59:59.999Z');
+  const summer = validateRunRequest({ storeKey: 'test', start: '2026-07-01', end: '2026-07-31' });
+  assert.equal(summer.params.created_at_from, '2026-07-01T04:00:00.000Z');
+  assert.equal(summer.params.created_at_to, '2026-08-01T03:59:59.999Z');
 });
 
 test('validates report level and allows UPS only when shipment rows are requested', () => {

@@ -17,6 +17,7 @@ test('rejects report jobs when the active-job limit is reached', () => {
     storeKey: 'test',
     start: '2026-02-01',
     end: '2026-02-02',
+    includeUps: false,
   });
 
   assert.throws(
@@ -24,6 +25,7 @@ test('rejects report jobs when the active-job limit is reached', () => {
       storeKey: 'test',
       start: '2026-02-01',
       end: '2026-02-02',
+      includeUps: false,
     }),
     { statusCode: 429 }
   );

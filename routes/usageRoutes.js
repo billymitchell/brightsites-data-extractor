@@ -18,6 +18,7 @@ router.get('/usage', (req, res) => {
   });
 
   if (storeKey) {
+    if (!Object.hasOwn(stores, storeKey)) return res.status(404).json({ error: 'Store not found.' });
     const count = monthData[storeKey] || 0;
     return res.json({ month, store: storeKey, metrics: calc(count) });
   }
@@ -26,17 +27,8 @@ router.get('/usage', (req, res) => {
   Object.keys(stores).forEach((key) => {
     all[key] = calc(monthData[key] || 0);
   });
-  Object.keys(monthData).forEach((key) => {
-    if (!all[key]) all[key] = calc(monthData[key]);
-  });
+  // Only configured stores are reported; older usage files may hold keys that were API tokens.
   return res.json({ month, stores: all });
-});
-
-router.post('/usage/reset', (req, res) => {
-  const body = req.body || {};
-  const month = body.month || usage.monthKey();
-  usage.reset(month);
-  res.json({ ok: true, month });
 });
 
 module.exports = router;

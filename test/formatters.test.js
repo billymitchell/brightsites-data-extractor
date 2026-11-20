@@ -69,3 +69,17 @@ test('date-only API dates keep their calendar date across time zones', () => {
   assert.equal(formatDateMDY('2026-02-01'), '02/01/2026');
   assert.equal(formatDateMDY('2026-02-30'), '');
 });
+
+test('formatDateMDY uses the report timezone, not the server timezone', () => {
+  const { formatDateMDY } = require('../utils/formatters');
+  assert.equal(formatDateMDY('2026-10-31T21:00:00-04:00'), '10/31/2026');
+  assert.equal(formatDateMDY('2026-11-01T02:30:00Z'), '10/31/2026');
+  assert.equal(formatDateMDY('2026-11-01T12:00:00Z'), '11/01/2026');
+});
+
+test('zonedTimeToUtc handles daylight saving transitions', () => {
+  const { zonedTimeToUtc } = require('../utils/timezone');
+  assert.equal(zonedTimeToUtc({ year: 2026, month: 3, day: 8 }).toISOString(), '2026-03-08T05:00:00.000Z');
+  assert.equal(zonedTimeToUtc({ year: 2026, month: 3, day: 8, hour: 23, minute: 59, second: 59, ms: 999 }).toISOString(), '2026-03-09T03:59:59.999Z');
+  assert.equal(zonedTimeToUtc({ year: 2026, month: 11, day: 1, hour: 23, minute: 59, second: 59, ms: 999 }).toISOString(), '2026-11-02T04:59:59.999Z');
+});

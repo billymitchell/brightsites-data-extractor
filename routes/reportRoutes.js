@@ -26,7 +26,7 @@ router.post('/run', async (req, res) => {
       return res.status(err.statusCode).json({ error: err.message });
     }
     logError('routes/reportRoutes.postRun', err, requestMeta);
-    return res.status(500).json({ error: String(err) });
+    return res.status(500).json({ error: 'The report could not be started. Use "Download support info" for details.' });
   }
 });
 
@@ -79,8 +79,11 @@ router.post('/run/:jobId/workbook', async (req, res) => {
     res.set('Content-Disposition', 'attachment; filename="brightsites_orders_and_shipments.xlsx"');
     return res.send(buffer);
   } catch (err) {
-    if (!err.statusCode) logError('routes/reportRoutes.workbook', err, { jobId: req.params.jobId });
-    return res.status(err.statusCode || 500).json({ error: err.message });
+    if (!err.statusCode) {
+      logError('routes/reportRoutes.workbook', err, { jobId: req.params.jobId });
+      return res.status(500).json({ error: 'The Excel workbook could not be built. Please try again.' });
+    }
+    return res.status(err.statusCode).json({ error: err.message });
   }
 });
 

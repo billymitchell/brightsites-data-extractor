@@ -26,7 +26,17 @@ test('paired limits, cancellation and enrichment failures reject incomplete resu
   await assert.rejects(buildReportTables({ ...opts, reportLevel: 'both', maxRows: 3 }), /maximum of 3/);
   await assert.rejects(buildReportTables({ ...opts, reportLevel: 'both', isCanceled: () => true }), /canceled/i);
   failure = true;
-  try { await assert.rejects(buildReportTables({ ...opts, reportLevel: 'both' }), /Source unavailable/); } finally { failure = false; }
+  try {
+    await assert.rejects(buildReportTables({ ...opts, reportLevel: 'both' }), /Source unavailable/);
+    await assert.rejects(buildReportTables({ ...opts, reportLevel: 'shipment' }), /Source unavailable/);
+  } finally { failure = false; }
+});
+test('order-level reports reject before enrichment when orders alone exceed the row limit', async () => {
+  calls = { order: 0, items: 0, shipments: 0 };
+  const orders = [{ id: 1 }, { id: 2 }, { id: 3 }];
+  await assert.rejects(buildReportTables({ ...opts, orders, reportLevel: 'order', maxRows: 2 }), /maximum of 2/);
+  await assert.rejects(buildReportTables({ ...opts, orders, reportLevel: 'both', maxRows: 2 }), /maximum of 2/);
+  assert.deepEqual(calls, { order: 0, items: 0, shipments: 0 });
 });
 test('empty paired results retain both column schemas', async () => {
   const { tables } = await buildReportTables({ ...opts, orders: [], reportLevel: 'both' });

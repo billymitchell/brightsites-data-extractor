@@ -35,13 +35,17 @@
   function getTableViewColumns(table, options) {
     return planTableView(table, options).columns;
   }
-  function buildTableView(table, options) {
+  function buildTableView(table, options = {}) {
     const { columns, keep, headers, details, indices } = planTableView(table, options);
-    return { columns, rows: table.rows.map((row, n) => {
+    // Columns are discovered from every row; only the requested rows are materialized (e.g. the preview).
+    const limited = Number.isInteger(options.rowLimit) && options.rowLimit >= 0;
+    const view = { columns, rows: table.rows.slice(0, limited ? options.rowLimit : table.rows.length).map((row, n) => {
       const values = keep.map(i => row[i]).concat(headers.map(h => details[n].get(h) ?? ''));
       return indices.map(i => values[i]);
     }),
       rowKeys: table.rowKeys || [] };
+    if (limited) view.totalRows = table.rows.length;
+    return view;
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { buildTableView, getTableViewColumns };
   else root.BrightSitesReportView = { buildTableView, getTableViewColumns };

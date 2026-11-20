@@ -128,6 +128,11 @@ async function buildReportTables({ orders, storeOpts, debugInfo, onProgress, isC
     rowDetails.push(buildRowDetails(lineItem));
   };
 
+  // Each order is one order-level row, so fail before spending billable enrichment calls.
+  if (reportLevel !== 'shipment' && orders.length > maxRows) {
+    throw new Error(`Report exceeds the maximum of ${maxRows} rows. Narrow the date range and try again.`);
+  }
+
   if (typeof onProgress === 'function') {
     onProgress({
       phase: 'enriching-orders',
@@ -145,9 +150,10 @@ async function buildReportTables({ orders, storeOpts, debugInfo, onProgress, isC
       throwIfCanceled(isCanceled, 'Report job canceled while enriching orders.');
       const orderIdentifier = orderLookupId(order);
       const [fullOrder, lineItems, shipments] = await Promise.all([
-        loadOrder(orderIdentifier, Object.assign({}, storeOpts, { isCanceled, failOnError: reportLevel !== 'shipment' })),
-        loadLineItems(orderIdentifier, Object.assign({}, storeOpts, { isCanceled, failOnError: reportLevel !== 'shipment' })),
-        loadShipments(orderIdentifier, Object.assign({}, storeOpts, { isCanceled, failOnError: reportLevel !== 'shipment' })),
+        // A failed lookup must fail the report; treating it as empty silently drops rows.
+        loadOrder(orderIdentifier, Object.assign({}, storeOpts, { isCanceled, failOnError: true })),
+        loadLineItems(orderIdentifier, Object.assign({}, storeOpts, { isCanceled, failOnError: true })),
+        loadShipments(orderIdentifier, Object.assign({}, storeOpts, { isCanceled, failOnError: true })),
       ]);
       const mergedOrder = Object.assign({}, order, fullOrder || {});
       ordersProcessed += 1;

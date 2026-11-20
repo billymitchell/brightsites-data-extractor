@@ -8,7 +8,7 @@ const { escapeCsvCell } = require('../public/csv');
 
 // Exercise the same view builder used by the preview and CSV download.
 const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
-const start = html.indexOf('        function buildViewData(result) {');
+const start = html.indexOf('        function buildViewData(result, rowLimit) {');
 const end = html.indexOf('        downloadButton.addEventListener', start);
 
 function buildView(result, split, deselected = []) {

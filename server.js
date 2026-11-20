@@ -31,6 +31,13 @@ if (!authEnabled) {
   console.warn('WARNING: APP_PASSWORD/SESSION_SECRET not set; authentication is disabled (local dev only).');
 }
 
+const storesUsingTokenAsKey = Object.entries(require('./config/stores').getConfiguredStores())
+  .filter(([key, store]) => key === String(store.token)).length;
+if (storesUsingTokenAsKey) {
+  console.warn(`WARNING: ${storesUsingTokenAsKey} store(s) in BRIGHTSITES_STORES use the API token as the store key. `
+    + 'Store keys are shown in the browser, logs and support reports; give each store a plain key and a separate "token".');
+}
+
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -66,6 +73,14 @@ process.on('unhandledRejection', (reason) => {
 process.on('uncaughtException', (err) => {
   logError('process.uncaughtException', err, {});
 });
+
+// Heroku stops dynos with SIGTERM; save batched usage counts before exiting.
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.once(signal, () => {
+    require('./lib/usage').flush();
+    process.exit(0);
+  });
+}
 
 const HOST = process.env.HOST || (isProduction || process.env.DYNO ? '0.0.0.0' : '127.0.0.1');
 app.listen(PORT, HOST, () => logInfo('server.start', `Server listening on ${HOST}:${PORT}`, { port: PORT, auth: authEnabled }));

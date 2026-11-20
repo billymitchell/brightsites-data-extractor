@@ -55,15 +55,14 @@ test('UPS enriches shipment and paired reports by default, but not order reports
   } finally { ups.isConfigured = original.configured; ups.enrichRowsWithUps = original.enrich; }
 });
 
-test('default UPS enrichment fails explicitly when credentials are missing', async () => {
+test('default UPS enrichment is rejected before any API work when credentials are missing', async () => {
   const original = ups.isConfigured;
   ups.isConfigured = () => false;
   try {
     const base = { storeKey: 'test', start: '2026-02-01', end: '2026-02-02' };
-    const job = jobs.createJob(base);
-    const failed = await finished(job.id);
-    assert.equal(failed.status, 'failed');
-    assert.match(failed.error, /UPS_CLIENT_ID \/ UPS_CLIENT_SECRET missing/);
+    assert.throws(() => jobs.createJob(base), { statusCode: 503, message: /UPS_CLIENT_ID \/ UPS_CLIENT_SECRET missing/ });
+    assert.throws(() => jobs.createJob({ ...base, reportLevel: 'both' }), { statusCode: 503 });
+    assert.equal(jobs.getJobHistory().filter(j => j.status === 'failed').length, 0);
     const optedOut = jobs.createJob({ ...base, includeUps: false });
     assert.equal((await finished(optedOut.id)).status, 'completed');
     assert.ok(!jobs.getJobResult(optedOut.id).result.columns.includes('UPS Status'));

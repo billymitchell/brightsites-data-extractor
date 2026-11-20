@@ -395,9 +395,11 @@
                 start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
                 end = new Date(today.getFullYear(), today.getMonth(), 0);
             }
+            // Use the browser's calendar date; toISOString() rolls over to tomorrow in US evenings.
+            const localDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
             if (start && end) {
-                document.getElementById('start').value = start.toISOString().slice(0, 10);
-                document.getElementById('end').value = end.toISOString().slice(0, 10);
+                document.getElementById('start').value = localDate(start);
+                document.getElementById('end').value = localDate(end);
             }
         }
 
@@ -466,7 +468,7 @@
             const preview = document.getElementById('preview');
             const previewMeta = document.getElementById('previewMeta');
             preview.innerHTML = '';
-            const view = buildViewData(result);
+            const view = buildViewData(result, PREVIEW_ROW_LIMIT);
             const visible = view.columns;
             const table = document.createElement('table');
             const thead = document.createElement('thead');
@@ -476,10 +478,10 @@
             table.appendChild(thead);
             const tbody = document.createElement('tbody');
             const rows = view.rows.slice(0, PREVIEW_ROW_LIMIT);
-            if (view.rows.length > PREVIEW_ROW_LIMIT) {
-                previewMeta.textContent = `Preview is truncated. Showing ${rows.length} of ${view.rows.length} rows. Download the report to get the full result.`;
+            if (view.totalRows > PREVIEW_ROW_LIMIT) {
+                previewMeta.textContent = `Preview is truncated. Showing ${rows.length} of ${view.totalRows} rows. Download the report to get the full result.`;
             } else {
-                previewMeta.textContent = `Preview is showing all ${view.rows.length} rows returned by the server.`;
+                previewMeta.textContent = `Preview is showing all ${view.totalRows} rows returned by the server.`;
             }
             rows.forEach(r => {
                 const tr = document.createElement('tr');
@@ -726,12 +728,12 @@
         document.getElementById('colsNone').addEventListener('click', () => setSelection([]));
         document.getElementById('colsCore').addEventListener('click', () => setSelection(columnCatalog.core));
 
-        function buildViewData(result) {
+        function buildViewData(result, rowLimit) {
             result = result.tables ? result.tables[activeTableLevel] : result;
             const useDanielle = document.getElementById('danielleFormat').checked;
             if (!useDanielle) return BrightSitesReportView.buildTableView(result, {
                 deselectedColumns: [...deselectedColumns], splitPairs: document.getElementById('splitPairs').checked,
-                columnOrder: orderByLevel[activeTableLevel]
+                columnOrder: orderByLevel[activeTableLevel], rowLimit
             });
 
             const sourceIndexByName = {};
@@ -739,7 +741,8 @@
 
             const upsCols = result.columns.filter(c => c.startsWith('UPS ') || c === 'Expected Delivery Date');
             const targetColumns = DANIELLE_COLUMNS.concat(upsCols);
-            const mappedRows = result.rows.map(r => {
+            const sourceRows = rowLimit == null ? result.rows : result.rows.slice(0, rowLimit);
+            const mappedRows = sourceRows.map(r => {
                 return targetColumns.map(targetCol => {
                     const sourceCol = DANIELLE_SOURCE_MAP[targetCol] || targetCol;
                     const sourceIdx = sourceIndexByName[sourceCol];
@@ -747,7 +750,9 @@
                 });
             });
 
-            return { columns: targetColumns, rows: mappedRows };
+            const view = { columns: targetColumns, rows: mappedRows };
+            if (rowLimit != null) view.totalRows = result.rows.length;
+            return view;
         }
 
         downloadButton.addEventListener('click', async () => {
@@ -778,7 +783,8 @@
             } else {
                 const view = buildViewData(fullResult);
                 const csv = [view.columns, ...view.rows].map(r => r.map(BrightSitesCsv.escapeCsvCell).join(',')).join('\n');
-                blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                // The byte-order mark makes Excel read the file as UTF-8 (accents, ™, etc.).
+                blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
                 filename = fullResult.meta.reportLevel === 'order' ? 'brightsites_orders.csv' : 'brightsites_shipments.csv';
             }
             const url = URL.createObjectURL(blob);

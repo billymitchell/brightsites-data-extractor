@@ -76,19 +76,23 @@ For multiple stores, set `BRIGHTSITES_STORES` to a JSON object keyed by store ke
 
 The legacy single-store variables remain supported. Keep credentials in `.env`; do not commit it.
 
+Use a plain store key (like `shop-a`) and put the API token in `token`. Store keys are shown in the browser, logs and support reports, so a store keyed by its own token exposes that token; the server prints a warning at startup when it sees this.
+
 ## Reports and job retention
 
 - **Shipment Level** (default): one row for each item in each shipment, with rows for unshipped items. An item split across shipments appears more than once. Downloads CSV.
 - **Order Level**: one row per unique source order, including orders with no items or shipments. Financial totals come from the order once; quantities summarize original items and distinct shipments. Unknown quantities remain blank; real zero remains zero. Downloads CSV.
 - **Both tables (Excel)**: builds both tables from the same source fetch and enrichment pass. Switch between **Order Level** and **Shipment Level** previews and choose columns/split settings separately for each. **Download Excel** saves both tabs in one `.xlsx` file.
-- Reports require a selected store and both start and end dates; reversed ranges are rejected. Date-only end dates include the full selected day.
+- Reports require a selected store and both start and end dates; reversed ranges are rejected. Dates are whole days in `REPORT_TIMEZONE` (default `America/New_York`): the range runs from midnight on the start date to the end of the end date in that timezone, and order and ship dates are shown in that timezone too. Set it to the stores' business timezone, for example `America/Chicago`.
+- Shipment Level and Both reports need UPS credentials unless the request sets `includeUps: false`; without them the report is rejected before any BrightSites requests are made.
+- If BrightSites fails to return an order's details, line items or shipments (after retries), the report fails instead of silently leaving rows out.
 - Jobs run asynchronously. The browser polls for progress and can request cancellation.
 - At most two jobs run at once by default. Configure `REPORT_JOB_MAX_ACTIVE` to change the limit.
 - Reports are limited to 50,000 rows by default; Both mode counts rows across both tables. Larger results fail with guidance to narrow the date range. Configure `REPORT_MAX_ROWS` to change this limit.
 - Up to five completed report results are retained in memory by default. Older results are evicted when new reports complete. Configure `REPORT_JOB_MAX_RETAINED_RESULTS` to change this limit.
 - Job records expire after four hours by default (`REPORT_JOB_TTL_MS`); cleanup runs every ten minutes (`REPORT_JOB_CLEANUP_INTERVAL_MS`).
 - Jobs and report results are held in memory and are lost when the server restarts.
-- Usage counts are stored in `data/usage.json`; the running process caches the file to avoid rereading it for every API request.
+- Usage counts are stored in `data/usage.json`, keyed by store key. The running process keeps counts in memory and saves them every few seconds and on shutdown. Older entries keyed by API tokens are ignored by `/api/usage`. There is no reset endpoint; edit the file while the server is stopped if a correction is needed.
 
 ## Linked Excel reports
 
@@ -121,7 +125,7 @@ npm test
 
 ## Support / debug info
 
-Click **Download support info** (top right of the page) to save a plain-text `support-report-*.txt` file. It lists recent reports (store, dates, orders, rows, duration, errors), BrightSites API calls this month, web request counts, warnings/errors, and the last 100 log events. Tokens, passwords and cookies are hidden. Send that file when asking for help. Browser-side script errors are also logged. The data is in memory (last 500 log events, last 50 reports) and resets on restart; `server.log` keeps the full file log locally, and on Heroku use `heroku logs --tail`.
+Click **Download support info** (top right of the page) to save a plain-text `support-report-*.txt` file. It lists recent reports (store, dates, orders, rows, duration, errors), BrightSites API calls this month, web request counts, warnings/errors, and the last 100 log events. Tokens, passwords and cookies are hidden. Send that file when asking for help. Browser-side script errors are also logged. The data is in memory (last 500 log events, last 50 reports) and resets on restart; `server.log` keeps the full file log locally (with the same secrets hidden, rotated to `server.log.1` past 5 MB at startup; tests do not write to it), and on Heroku use `heroku logs --tail`.
 
 ## UPS tracking data (enabled by default)
 

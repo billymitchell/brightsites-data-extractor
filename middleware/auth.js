@@ -33,6 +33,11 @@ function createAuth({ password, secret, ttlMs = 8 * 3600 * 1000, secure = false,
     return e.count >= MAX_FAILS;
   }
   function recordFail(ip) {
+    // Drop expired entries so the map cannot grow without bound across many IPs.
+    if (fails.size >= 1000) {
+      for (const [key, entry] of fails) if (now() - entry.first > WINDOW_MS) fails.delete(key);
+      if (fails.size >= 10000) fails.delete(fails.keys().next().value);
+    }
     const e = fails.get(ip);
     if (!e || now() - e.first > WINDOW_MS) fails.set(ip, { first: now(), count: 1 });
     else e.count += 1;
