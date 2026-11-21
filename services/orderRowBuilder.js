@@ -1,7 +1,7 @@
 const { getReportColumnConfig, STRUCTURED_COLUMNS } = require('../config/report');
 const { pickFirstValue } = require('../utils/fields');
 const { formatDateMDY } = require('../utils/formatters');
-const { aggregateShipmentLineItems, buildStructuredContactFields, extractOrderAmounts, buildRowDetails } = require('./reportFields');
+const { aggregateShipmentLineItems, buildStructuredContactFields, extractOrderAmounts, buildRowDetails, storeAttributes } = require('./reportFields');
 
 function sumQuantities(values) {
   const valid = values.map(value => value == null || String(value).trim() === '' ? NaN : Number(value));
@@ -35,7 +35,7 @@ function summarizeDetails(items, optionsSettings) {
 function itemSummary(items, valueOf) {
   return [...new Set(items.map(valueOf).filter(value => value !== '' && value != null).map(String))].join('; ');
 }
-function buildOrderReportEntry({ order, line_items = [], shipments = [] }) {
+function buildOrderReportEntry({ order, line_items = [], shipments = [], store = null }) {
   const items = distinctRecords(line_items, true);
   const uniqueShipments = distinctRecords(shipments, false);
   const details = summarizeDetails(items);
@@ -53,7 +53,9 @@ function buildOrderReportEntry({ order, line_items = [], shipments = [] }) {
       }
     }
   }
+  const storeInfo = storeAttributes(order, store);
   const values = {
+    'Store Name': storeInfo.name, 'Store URL': storeInfo.url,
     'Order #': String(order.order_id ?? order.id ?? ''),
     Placed: formatDateMDY(order.placed_at || order.created_at),
     'Order Status': order.status || '', 'Billing Month': '',
