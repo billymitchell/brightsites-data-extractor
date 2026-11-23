@@ -42,6 +42,12 @@ test('line item text matches the BrightSites export layout', () => {
   assert.equal(c.customerName({ billing_contact: { first_name: 'Lee', last_name: '  Owner ' } }), 'Lee Owner');
 });
 
+test('personalizationValue falls back to a matching personalization title (VLR layout)', () => {
+  const li = { product_personalizations: [{ title: 'Establishment Name', attributes: [{ key: 'Printed Name', value: 'Millennium Tower' }] }] };
+  assert.equal(c.personalizationValue(li, 'Personalized Establishment Name', 'Establishment Name'), 'Millennium Tower');
+  assert.equal(c.personalizationValue({ product_personalizations: [] }, 'Establishment Name'), '');
+});
+
 test('store roles come from config or the store label', () => {
   const roles = c.resolveStoreRoles({
     a: { label: 'FTG Shop', subdomain: 'ftg-shop' },
