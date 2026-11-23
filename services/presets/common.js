@@ -97,12 +97,20 @@ function personalizationText(lineItem) {
   }).filter(Boolean).join('\n');
 }
 
+// Matches an attribute key first; otherwise a personalization whose title matches
+// (e.g. VLR's "Establishment Name" title with a "Printed Name" attribute).
 function personalizationValue(lineItem, ...keys) {
   const wanted = keys.map(k => k.toLowerCase());
-  for (const p of personalizations(lineItem)) {
+  const list = personalizations(lineItem);
+  for (const p of list) {
     for (const a of p.attributes || []) {
       if (a && wanted.includes(text(a.key || a.name).toLowerCase())) return text(a.value ?? '');
     }
+  }
+  for (const p of list) {
+    if (!wanted.includes(text(p.title || p.name).toLowerCase())) continue;
+    const values = (p.attributes || []).filter(Boolean).map(a => text(a.value ?? '')).filter(Boolean);
+    if (values.length) return values.join(' ');
   }
   return '';
 }
