@@ -93,6 +93,7 @@ function build({ stores, ranges }) {
 
 module.exports = {
   id: 'weekly-ftg-tracking-reports',
+  program: 'ftg',
   title: 'Weekly FTG Tracking Reports',
   description: 'Year-to-date awards redeemed, orders placed and shipment tracking for the Redemption, Product and VLR stores.',
   rangeHelp: 'Runs from January 1 of the end date\'s year to the end date (the start date is not used). Tracking sheets list shipments sent in that period, including orders placed late last year.',

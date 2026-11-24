@@ -56,3 +56,16 @@ test('store roles come from config or the store label', () => {
   });
   assert.deepEqual(Object.fromEntries(Object.entries(roles).map(([r, s]) => [r, s.storeKey])), { product: 'a', redemption: 'b', vlr: 'v' });
 });
+
+test('a program limits which stores fill preset roles', () => {
+  const stores = {
+    'ryder-shop': { label: 'Ryder Shop', program: 'ryder' },
+    'ftg-shop': { label: 'FTG Shop', program: 'ftg', role: 'product' },
+    'ftg-redemption': { label: 'FTG Redemption', program: 'ftg' },
+  };
+  const ftg = c.resolveStoreRoles(stores, 'ftg');
+  assert.deepEqual(Object.fromEntries(Object.entries(ftg).map(([r, s]) => [r, s.storeKey])), { product: 'ftg-shop', redemption: 'ftg-redemption' });
+  // Without programs in the config, every store is still considered.
+  const legacy = c.resolveStoreRoles({ a: { label: 'Some Shop' } }, 'ftg');
+  assert.equal(legacy.product.storeKey, 'a');
+});

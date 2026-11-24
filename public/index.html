@@ -43,6 +43,9 @@
         #storeSummary { display: inline-block; max-width: calc(100% - 1.5rem); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; vertical-align: bottom; }
         #storeSelect[aria-disabled=true] summary { pointer-events: none; opacity: .5; }
         #storeOptions li.all { border-bottom: 1px solid var(--pico-muted-border-color); }
+        #storeOptions li.program { font-weight: 600; margin-top: .25rem; }
+        #storeOptions li.in-program { padding-left: 1.25rem; }
+        .preset-group { font-weight: 600; margin: .75rem 0 .25rem; }
         #formatGroup label small { grid-column: 2; display: block; margin-top: .15rem; font-size: .8rem; line-height: 1.4; color: var(--pico-muted-color); }
         .preset-help { font-size: .85rem; margin: .25rem 0 0; padding: .5rem .75rem; border-left: 3px solid var(--pico-primary); background: var(--pico-card-sectioning-background-color); }
         #presetTabs button { width: auto; }
@@ -564,7 +567,19 @@
             presetOptionsEl.innerHTML = '';
             let saved = '';
             try { saved = localStorage.getItem('brightsites_report_format_v1') || ''; } catch (e) { /* ignore */ }
+            let lastProgram = null;
             presetCatalog.forEach(preset => {
+                // Formats belong to a program; a heading starts each program's group.
+                const program = preset.program || '';
+                if (program !== lastProgram) {
+                    lastProgram = program;
+                    if (preset.programLabel && program) {
+                        const heading = document.createElement('p');
+                        heading.className = 'preset-group';
+                        heading.textContent = `${preset.programLabel} report formats`;
+                        presetOptionsEl.appendChild(heading);
+                    }
+                }
                 const label = document.createElement('label');
                 label.className = 'preset-option';
                 const input = document.createElement('input');
@@ -1094,6 +1109,20 @@
         function selectedStoreKeys() {
             return storeCheckboxes().filter(cb => cb.checked).map(cb => cb.value);
         }
+        function programCheckboxes() {
+            return Array.from(document.querySelectorAll('#storeOptions input[name=storeProgram]'));
+        }
+        // Stores grouped by program, in the order each program first appears in the config.
+        function storeGroups() {
+            const groups = [];
+            storeList.forEach(s => {
+                const id = s.program || '';
+                let group = groups.find(g => g.id === id);
+                if (!group) groups.push(group = { id, label: s.programLabel || 'Other stores', stores: [] });
+                group.stores.push(s);
+            });
+            return groups;
+        }
         function updateStoreSummary() {
             const keys = selectedStoreKeys();
             const summary = document.getElementById('storeSummary');
@@ -1102,10 +1131,20 @@
                 all.checked = storeList.length > 0 && keys.length === storeList.length;
                 all.indeterminate = keys.length > 0 && keys.length < storeList.length;
             }
+            programCheckboxes().forEach(box => {
+                const members = storeList.filter(s => (s.program || '') === box.value).map(s => s.key);
+                const chosen = members.filter(k => keys.includes(k)).length;
+                box.checked = members.length > 0 && chosen === members.length;
+                box.indeterminate = chosen > 0 && chosen < members.length;
+            });
             const labels = storeList.filter(s => keys.includes(s.key)).map(s => s.label);
+            const programs = storeGroups();
+            const fullProgram = programs.length > 1 && programs.find(g => g.stores.length === keys.length
+                && g.stores.every(s => keys.includes(s.key)));
             summary.textContent = !labels.length ? '-- select stores --'
                 : labels.length === 1 ? labels[0]
                 : labels.length === storeList.length ? `All stores (${labels.length})`
+                : fullProgram ? `All ${fullProgram.label} stores (${labels.length})`
                 : `${labels.length} stores: ${labels.join(', ')}`;
             summary.title = labels.join(', ');
             try { localStorage.setItem(STORE_PREF_KEY, JSON.stringify(keys)); } catch (e) { /* ignore */ }
@@ -1120,7 +1159,7 @@
             picker.disabled = disabled;
             picker.setAttribute('aria-disabled', disabled ? 'true' : 'false');
             if (disabled) picker.open = false;
-            storeCheckboxes().forEach(cb => { cb.disabled = disabled; });
+            storeCheckboxes().concat(programCheckboxes()).forEach(cb => { cb.disabled = disabled; });
             const all = document.getElementById('storeAll');
             if (all) all.disabled = disabled;
         }
@@ -1152,14 +1191,36 @@
                     li.className = 'all';
                     list.appendChild(li);
                 }
-                storeList.forEach(s => {
-                    const cb = document.createElement('input');
-                    cb.type = 'checkbox';
-                    cb.name = 'store';
-                    cb.value = s.key;
-                    cb.checked = Array.isArray(saved) && saved.includes(s.key);
-                    cb.addEventListener('change', onStoreSelectionChange);
-                    list.appendChild(storeOption(cb, s.label + (s.subdomain ? ` (${s.subdomain})` : '')));
+                // With more than one program, each program gets a heading that selects all its stores.
+                const groups = storeGroups();
+                const grouped = groups.length > 1;
+                groups.forEach(group => {
+                    if (grouped) {
+                        const box = document.createElement('input');
+                        box.type = 'checkbox';
+                        box.name = 'storeProgram';
+                        box.value = group.id;
+                        box.addEventListener('change', () => {
+                            storeCheckboxes().forEach(cb => {
+                                if (group.stores.some(s => s.key === cb.value)) cb.checked = box.checked;
+                            });
+                            onStoreSelectionChange();
+                        });
+                        const li = storeOption(box, `${group.label} (${group.stores.length})`);
+                        li.className = 'program';
+                        list.appendChild(li);
+                    }
+                    group.stores.forEach(s => {
+                        const cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.name = 'store';
+                        cb.value = s.key;
+                        cb.checked = Array.isArray(saved) && saved.includes(s.key);
+                        cb.addEventListener('change', onStoreSelectionChange);
+                        const li = storeOption(cb, s.label + (s.subdomain ? ` (${s.subdomain})` : ''));
+                        if (grouped) li.className = 'in-program';
+                        list.appendChild(li);
+                    });
                 });
                 if (storeList.length === 1) storeCheckboxes().forEach(cb => { cb.checked = true; });
                 updateStoreSummary();

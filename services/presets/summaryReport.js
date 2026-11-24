@@ -131,6 +131,7 @@ function build({ stores, ranges, generatedAt }) {
 
 module.exports = {
   id: 'summary-report',
+  program: 'ftg',
   title: 'Summary Report',
   description: 'Weekly and year-to-date award counts and Brand Store sales, less corporate orders, with an inventory section to fill in.',
   rangeHelp: 'The start and end dates are the week. Year to date runs from January 1 of the end date\'s year to the end date.',

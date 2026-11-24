@@ -26,6 +26,7 @@ function harness(preferences = { account: false }, presets = [], stores = [{ key
     createElement: () => { const el = new Element(); created.push(el); return el; },
     createTextNode: s => ({textContent:s}), body: new Element(),
     querySelectorAll: sel => (sel.includes('reportFormat') ? created.filter(el => el.name === 'reportFormat')
+      : sel.includes('name=storeProgram') ? created.filter(el => el.name === 'storeProgram')
       : sel.includes('name=store') ? created.filter(el => el.name === 'store') : []),
     querySelector: sel => (sel.includes('reportFormat') ? created.find(el => el.name === 'reportFormat' && el.checked) || null : null),
   };
@@ -226,4 +227,27 @@ test('several stores can be chosen for one consolidated report', async () => {
   all.checked = true; all.events.change();
   assert.ok(boxes.every(b => b.checked));
   assert.equal(document.getElementById('storeSummary').textContent, 'All stores (3)');
+});
+
+test('stores are grouped by program and a program heading selects its stores', async () => {
+  const stores = [
+    { key: 'ftg-shop', label: 'FTG Shop', subdomain: 'ftg-shop', program: 'ftg', programLabel: 'FTG' },
+    { key: 'ftg-redemption', label: 'FTG Redemption', subdomain: 'ftg-redemption', program: 'ftg', programLabel: 'FTG' },
+    { key: 'ryder-scs', label: 'Ryder SCS', subdomain: 'ryderscs', program: 'ryder', programLabel: 'Ryder' },
+  ];
+  const { document, context, created } = harness({ account: false }, [], stores);
+  await vm.runInContext('preferencesReady', context);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const programs = created.filter(el => el.name === 'storeProgram');
+  assert.deepEqual(programs.map(p => p.value), ['ftg', 'ryder']);
+  const boxes = created.filter(el => el.name === 'store');
+
+  programs[0].checked = true; programs[0].events.change();
+  assert.deepEqual(boxes.map(b => b.checked), [true, true, false]);
+  assert.equal(document.getElementById('storeSummary').textContent, 'All FTG stores (2)');
+  assert.equal(programs[1].checked, false);
+
+  boxes[1].checked = false; boxes[1].events.change();
+  assert.equal(programs[0].indeterminate, true);
+  assert.equal(document.getElementById('storeSummary').textContent, 'FTG Shop');
 });

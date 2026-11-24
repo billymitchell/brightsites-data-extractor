@@ -1,4 +1,4 @@
-const { getConfiguredStores } = require('../../config/stores');
+const { getConfiguredStores, storeProgram } = require('../../config/stores');
 const { zonedDateString } = require('../../utils/timezone');
 
 // ----- Stores -----------------------------------------------------------------
@@ -19,9 +19,13 @@ function storeRole(store) {
   return null;
 }
 
-function resolveStoreRoles(stores = getConfiguredStores()) {
+// With a program, only that program's stores fill roles, so another client's "shop" store is
+// never used by an FTG format. Configs that declare no programs at all keep matching every store.
+function resolveStoreRoles(stores = getConfiguredStores(), program = '') {
   const out = {};
+  const anyProgram = Object.values(stores).some(s => storeProgram(s).id);
   for (const [storeKey, store] of Object.entries(stores)) {
+    if (program && anyProgram && storeProgram(store).id !== program) continue;
     const role = storeRole(store);
     if (role && !out[role]) out[role] = { storeKey, store, label: store.label || storeKey };
   }

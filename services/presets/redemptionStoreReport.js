@@ -95,6 +95,7 @@ function build({ stores, ranges }) {
 
 module.exports = {
   id: 'redemption-store-report',
+  program: 'ftg',
   title: 'Redemption Store Report',
   description: 'Every award redeemed in the Redemption Store between the start and end dates, with counts by award type and level.',
   rangeHelp: 'Uses orders placed from the start date to the end date.',

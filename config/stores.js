@@ -30,6 +30,32 @@ function getConfiguredStores() {
   return {};
 }
 
+// A store's program groups it in the UI and decides which report formats can use it.
+// "program" is an ID like "ftg"; "programLabel" optionally overrides its display name.
+function storeProgram(store = {}) {
+  const id = String(store.program || '').trim().toLowerCase();
+  if (!id) return { id: '', label: 'Other stores' };
+  const custom = String(store.programLabel || '').trim();
+  const label = custom || (id.length <= 3 ? id.toUpperCase() : id.charAt(0).toUpperCase() + id.slice(1));
+  return { id, label };
+}
+
+// Stores for the browser: never includes the API token.
+function listStoresForClient(stores = getConfiguredStores()) {
+  return Object.entries(stores).map(([key, value]) => {
+    const program = storeProgram(value);
+    return {
+      key,
+      label: value.label || key,
+      subdomain: value.subdomain,
+      program: program.id,
+      programLabel: program.label,
+    };
+  });
+}
+
 module.exports = {
   getConfiguredStores,
+  storeProgram,
+  listStoresForClient,
 };

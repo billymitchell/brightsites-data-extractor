@@ -5,6 +5,7 @@ const { promisePool } = require('../../utils/async');
 const { throwIfCanceled } = require('../../utils/cancel');
 const { parseDateOnly, dayStartUtc, dayEndUtc, zonedDateString, addDays } = require('../../utils/timezone');
 const { STORE_ROLES, resolveStoreRoles } = require('./common');
+const { getConfiguredStores, storeProgram } = require('../../config/stores');
 const { renderWorkbook } = require('./workbook');
 
 const PRESETS = [
@@ -23,9 +24,18 @@ function httpError(statusCode, message) {
   return Object.assign(new Error(message), { statusCode });
 }
 
+// A program's display name follows its stores' "programLabel" when one is set.
+function programLabelFor(programId) {
+  const store = Object.values(getConfiguredStores()).find(s => storeProgram(s).id === programId && s.programLabel);
+  return store ? store.programLabel : '';
+}
+
+// Formats for programs with no configured stores are left out; configs without programs list every format.
 function listPresets() {
-  const roles = resolveStoreRoles();
-  return PRESETS.map(p => {
+  const programs = new Set(Object.values(getConfiguredStores()).map(s => storeProgram(s).id).filter(Boolean));
+  return PRESETS.filter(p => !programs.size || !p.program || programs.has(p.program)).map(p => {
+    const roles = resolveStoreRoles(undefined, p.program);
+    const program = storeProgram({ program: p.program, programLabel: programLabelFor(p.program) });
     const stores = Object.entries(p.stores).map(([role, need]) => ({
       role, roleLabel: STORE_ROLES[role], required: need.required,
       storeKey: roles[role] ? roles[role].storeKey : null,
@@ -33,6 +43,7 @@ function listPresets() {
     }));
     return {
       id: p.id, title: p.title, description: p.description, rangeHelp: p.rangeHelp, stores,
+      program: program.id, programLabel: program.label,
       available: stores.every(s => !s.required || s.storeKey),
     };
   });
@@ -45,7 +56,7 @@ function validatePresetRequest(body = {}) {
     throw httpError(400, 'Start and end must be valid dates (YYYY-MM-DD).');
   }
   if (body.end < body.start) throw httpError(400, 'End date must be on or after the start date.');
-  const roles = resolveStoreRoles();
+  const roles = resolveStoreRoles(undefined, preset.program);
   const missing = Object.entries(preset.stores).filter(([role, need]) => need.required && !roles[role]);
   if (missing.length) {
     throw httpError(400, `${preset.title} needs the ${missing.map(([role]) => STORE_ROLES[role]).join(' and ')}, which is not configured on this server.`);
@@ -93,7 +104,7 @@ async function runPreset(request, { isCanceled, onProgress, maxRows = Infinity }
   const preset = byId.get(request.preset);
   if (!preset) throw httpError(400, `Unknown report format '${String(request.preset)}'.`);
   const ranges = rangesFor(request);
-  const roles = resolveStoreRoles();
+  const roles = resolveStoreRoles(undefined, preset.program);
   const stores = {};
   const warnings = [];
   for (const [role, need] of Object.entries(preset.stores)) {

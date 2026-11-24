@@ -108,6 +108,7 @@ function build({ stores, ranges }) {
 
 module.exports = {
   id: 'product-store-report',
+  program: 'ftg',
   title: 'Product Store Report',
   description: 'Every line item placed in the Product Store between the start and end dates, with sales totals that take off corporate orders.',
   rangeHelp: 'Uses orders placed from the start date to the end date.',

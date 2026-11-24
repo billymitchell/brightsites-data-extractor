@@ -1,6 +1,6 @@
 const express = require('express');
 
-const { getConfiguredStores } = require('../config/stores');
+const { listStoresForClient } = require('../config/stores');
 
 const { getReportColumnConfig } = require('../config/report');
 const { UPS_COLUMNS } = require('../lib/ups');
@@ -9,13 +9,7 @@ const { listPresets } = require('../services/presets');
 const router = express.Router();
 
 router.get('/stores', (req, res) => {
-  const stores = getConfiguredStores();
-  const out = Object.entries(stores).map(([key, value]) => ({
-    key,
-    label: value.label || key,
-    subdomain: value.subdomain,
-  }));
-  res.json(out);
+  res.json(listStoresForClient());
 });
 
 router.get('/columns', (req, res) => {
