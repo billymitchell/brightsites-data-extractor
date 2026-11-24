@@ -55,7 +55,7 @@ Free-tier limits may change. At implementation, Supabase Free included 50,000 mo
 heroku config:set NODE_ENV=production \
   APP_PASSWORD='a-long-random-passphrase' \
   SESSION_SECRET=$(openssl rand -hex 32) \
-  BRIGHTSITES_STORES='{"key":{"subdomain":"foo","token":"...","label":"Foo"}}'
+  BRIGHTSITES_STORES='{"foo":{"subdomain":"foo","label":"Foo","program":"client-a","token":"..."}}'
 ```
 
 - Every page and `/api` route requires sign-in; sessions are signed HttpOnly cookies (default 8h, `SESSION_TTL_MS`). Logins are throttled to 5 failures per 15 minutes per IP.
